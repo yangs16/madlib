@@ -1,0 +1,316 @@
+m4_include(`SQLCommon.m4')
+
+CREATE OR REPLACE FUNCTION
+MADLIB_SCHEMA.newplda_random_assign(word_cnt int4, num_topic int4)
+RETURNS int4[] AS 'MODULE_PATHNAME', 'randomAssign' LANGUAGE C STRICT;
+
+CREATE OR REPLACE FUNCTION
+MADLIB_SCHEMA.newplda_gibbs_sample(topics int4[], count_d_z int4[], count_w_z int4[],
+                        count_z int4[], alpha float, beta float)
+RETURNS int4[]
+AS 'MODULE_PATHNAME', 'sampleNewTopic' LANGUAGE C STRICT;
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.newplda_sum_topic_count(state int4[], topics int4[], num_topic int4)
+RETURNS int4[] 
+AS 'MODULE_PATHNAME', 'sumTopicCount' LANGUAGE C;
+
+DROP AGGREGATE IF EXISTS MADLIB_SCHEMA.newplda_sum_topic_count_agg(int4[], int4);
+CREATE AGGREGATE MADLIB_SCHEMA.newplda_sum_topic_count_agg(int4[], int4)
+(
+        sfunc = MADLIB_SCHEMA.newplda_sum_topic_count,
+        stype = int4[]
+);
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.newplda_log_likelihood(state float8, counts int4[], hyper float8)
+RETURNS float8 
+AS 'MODULE_PATHNAME', 'logLikelihood' LANGUAGE C STRICT;
+
+DROP AGGREGATE IF EXISTS MADLIB_SCHEMA.newplda_log_likelihood_agg(int4[], float8);
+CREATE AGGREGATE MADLIB_SCHEMA.newplda_log_likelihood_agg(int4[], float8)
+(
+        sfunc = MADLIB_SCHEMA.newplda_log_likelihood,
+        stype = float8,
+	initcond = '0.0'
+);
+
+CREATE TYPE MADLIB_SCHEMA.newplda_word_prob AS (word text, prob float8);
+
+CREATE FUNCTION MADLIB_SCHEMA.newplda_desc_topic(topicid int4, label text, top int4, beta float8)
+RETURNS SETOF MADLIB_SCHEMA.newplda_word_prob AS $$
+	total = plpy.execute('select SUM(topics[%d] + %f) total from word_topic_%s' % (topicid, beta, label))[0]['total']
+	return plpy.execute('SELECT word, (topics[%d] + %f)/%f AS prob FROM word_topic_%s as word_topic, vocab_%s as vocab WHERE word_topic.wordid = vocab.wordid ORDER BY prob DESC LIMIT %d' % (topicid, beta, total, label, label, top))
+$$ LANGUAGE plpythonu;
+
+
+CREATE FUNCTION MADLIB_SCHEMA.newplda_gen_topic_desc(num_topic int4, label text, top int4, beta float8)
+RETURNS text AS $$
+	plpy.execute('drop table if exists topic_desc_%s' % (label))
+	plpy.execute('create table topic_desc_%s(topicid int4, word text, prob float8)' % (label) \
+		+ m4_ifdef(`GREENPLUM', `" WITH (appendonly=true,compresstype=quicklz) distributed by (topicid)"'))
+	for topicid in xrange(1, num_topic + 1):
+		total = plpy.execute('select SUM(topics[%d] + %f) total from word_topic_%s' % (topicid, beta, label))[0]['total']
+		sql_str = 'INSERT INTO topic_desc_%s SELECT %d, word, (topics[%d] + %f)/%f AS prob FROM word_topic_%s as word_topic, vocab_%s as vocab ' + \
+			'WHERE word_topic.wordid = vocab.wordid ORDER BY prob DESC LIMIT %d'
+		plpy.execute(sql_str % (label, topicid, topicid, beta, total, label, label, top))
+	return "run 'select * from topic_desc_%s order by topicid asc, prob desc' to show results" % (label)
+$$ LANGUAGE plpythonu;
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.newplda_doc_topic_dist(topics int4[], alpha float8)
+RETURNS float8[] AS $$
+	global topics
+
+	total = sum(topics)
+	total += alpha * len(topics)
+	topics = map(lambda r: (float(r)+alpha)/total, topics)
+	return topics 
+$$ LANGUAGE plpythonu;
+
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.newplda_doc_topic_main(topics int4[], alpha float8)
+RETURNS int4[] AS $$
+	global topics
+
+	total = sum(topics)
+	total += alpha * len(topics)
+	topics = map(lambda r: (float(r)+alpha)/total, topics)
+	idx = range(len(topics))
+	idx.sort(key=lambda r: topics[r], reverse=True)
+	return idx[:10] 
+$$ LANGUAGE plpythonu;
+
+CREATE OR REPLACE FUNCTION
+MADLIB_SCHEMA.newplda_pred(dataset text, num_topic int4, alpha float8, beta float8, label text)
+RETURNS text AS $$
+	import plpy
+	import random
+	import time
+
+	class PLDA:
+		def __init__(self, dataset, num_topic, alpha, beta, label = ''):
+			label = label.replace('.', '_')
+			self.dataset = dataset
+			self.num_topic = num_topic
+			self.alpha = alpha
+			self.beta = beta
+
+			if label.strip() != '':
+				label = '_' + label.strip()
+			self.word_topic = 'word_topic' + label
+			
+			self.doc_topic = 'doc_topic' + label + '_pred'
+			plpy.execute('drop table if exists %s' % self.doc_topic)
+			plpy.execute('create table %s(docid int4, topics int4[]) ' % (self.doc_topic) \
+				+ m4_ifdef(`GREENPLUM', `" WITH (appendonly=true,compresstype=quicklz) distributed by (docid)"'))
+
+			str_sql = 'select sum(topics) topics from %s'
+			count_z_t = plpy.execute(str_sql % (self.word_topic))
+        		if (count_z_t.nrows() <> 1):
+				plpy.error("error: count_z is not of the expected form")
+			self.count_z = count_z_t[0]['topics']
+
+			plpy.execute('drop table if exists doc_word_topic_0')
+			plpy.execute('create table doc_word_topic_0(docid int4, wordid int4, topics int4[])' \
+				+ m4_ifdef(`GREENPLUM', `" WITH (appendonly=true,compresstype=quicklz) distributed by (docid)"'))
+			plpy.execute('drop table if exists doc_word_topic_1')
+			plpy.execute('create table doc_word_topic_1(docid int4, wordid int4, topics int4[])' \
+				+ m4_ifdef(`GREENPLUM', `" WITH (appendonly=true,compresstype=quicklz) distributed by (docid)"'))
+
+		def init_random(self):
+			stime = time.time()
+			plpy.info('initializing topics randomly...')
+			plpy.execute('truncate table doc_word_topic_0');
+			plpy.execute('insert into doc_word_topic_0 ' + \
+				'select docid, wordid, MADLIB_SCHEMA.newplda_random_assign(count, %d) from %s' % (self.num_topic, self.dataset))
+			etime = time.time()
+			plpy.info('\t\ttime elapsed: %.2f seconds' % (etime - stime))
+
+		def comp_doc_topic(self, it):
+			stime = time.time()
+			plpy.info('\t\tcomputing per-document topic distribution...')
+			plpy.execute('truncate table %s' % (self.doc_topic))
+			plpy.execute('insert into %s select docid, ' % (self.doc_topic) + \
+				'MADLIB_SCHEMA.newplda_sum_topic_count_agg(topics, %d) from doc_word_topic_%d group by docid' % (self.num_topic, it % 2))
+			etime = time.time()
+			plpy.info('\t\t\ttime elapsed: %.2f seconds' % (etime - stime))
+
+		def iteration(self, it):  
+			stime = time.time()
+			plpy.info('iteration [%d]....' % (it))
+
+			sstime = time.time()
+			plpy.info('\t\tsampling new topics...')
+			plpy.execute('truncate table doc_word_topic_%d' % (it % 2))
+			str_sql = 'insert into doc_word_topic_%d ' + \
+				'select dwz.docid, dwz.wordid, MADLIB_SCHEMA.newplda_gibbs_sample(' + \
+				'dwz.topics, dz.topics, wz.topics, array[%s], %f, %f) ' + \
+				'from doc_word_topic_%d as dwz, %s as dz, %s as wz ' + \
+				'where dwz.docid = dz.docid and dwz.wordid = wz.wordid'
+			plpy.execute(str_sql % (it % 2, str(self.count_z)[1:-1].replace('L', ''), self.alpha, self.beta, 1 - it % 2, self.doc_topic, self.word_topic)) 
+			eetime = time.time()
+			plpy.info('\t\t\ttime elapsed: %.2f seconds' % (eetime - sstime))
+
+			self.comp_doc_topic(it)
+			etime = time.time()
+			plpy.info('\t\ttime elapsed: %.2f seconds' % (etime - stime))
+		
+		def run(self):
+			stime = time.time()
+
+			# initialize
+			self.init_random()
+			self.comp_doc_topic(0)
+
+			plpy.info('start predicting process...')
+			for it in range(1, 20):
+				self.iteration(it)
+			etime = time.time()
+			plpy.info('finished, time elapsed: %.2f seconds' % (etime - stime))
+
+	plda = PLDA(dataset, num_topic, alpha, beta, label)
+	plda.run()
+	return 'succeeds';
+$$ LANGUAGE plpythonu;
+
+CREATE OR REPLACE FUNCTION
+MADLIB_SCHEMA.newplda_train(dataset text, num_topic int4, num_iter int4, alpha float8, beta float8, label text, init boolean)
+RETURNS text AS $$
+	import plpy
+	import random
+	import time
+
+	class PLDA:
+		"""Scalable and Parallel In-Database LDA"""
+		def __init__(self, dataset, num_topic, num_iter, alpha, beta, label, init = True):
+			plpy.info('constructing PLDA object...')
+			label = label.replace('.', '_')
+			self.dataset = dataset
+			self.num_topic = num_topic
+			self.num_iter = num_iter
+			self.alpha = alpha
+			self.beta = beta
+			self.count_z = []
+
+			if label.strip() != '':
+				label = '_' + label.strip()
+			self.doc_topic = 'doc_topic' + label
+			self.word_topic = 'word_topic' + label
+			
+			self.init = init
+
+			if self.init == True:
+				plpy.execute('drop table if exists doc_word_topic_0')
+				plpy.execute('create table doc_word_topic_0(docid int4, wordid int4, topics int4[])' \
+					+ m4_ifdef(`GREENPLUM', `" WITH (appendonly=true,compresstype=quicklz) distributed by (docid)"'))
+				plpy.execute('drop table if exists doc_word_topic_1')
+				plpy.execute('create table doc_word_topic_1(docid int4, wordid int4, topics int4[])' \
+					+ m4_ifdef(`GREENPLUM', `" WITH (appendonly=true,compresstype=quicklz) distributed by (docid)"'))
+				plpy.execute('drop table if exists %s' % self.doc_topic)
+				plpy.execute('create table %s(docid int4, topics int4[]) ' % (self.doc_topic) \
+					+ m4_ifdef(`GREENPLUM', `" WITH (appendonly=true,compresstype=quicklz) distributed by (docid)"'))
+				plpy.execute('drop table if exists %s' % (self.word_topic))
+				plpy.execute('create table %s(wordid int4, topics int4[]) ' % (self.word_topic) \
+					+ m4_ifdef(`GREENPLUM', `" WITH (appendonly=true,compresstype=quicklz) distributed by (wordid)"'))
+
+		def init_random(self):
+			stime = time.time()
+			plpy.info('initializing topics randomly...')
+			plpy.execute('truncate table doc_word_topic_0');
+			plpy.execute('insert into doc_word_topic_0 ' + \
+				'select docid, wordid, MADLIB_SCHEMA.newplda_random_assign(count, %d) from %s' % (self.num_topic, self.dataset))
+			etime = time.time()
+			plpy.info('\t\ttime elapsed: %.2f seconds' % (etime - stime))
+
+		def comp_doc_topic(self, it):
+			stime = time.time()
+			plpy.info('\t\tcomputing per-document topic distribution...')
+			plpy.execute('truncate table %s' % (self.doc_topic))
+			plpy.execute('insert into %s select docid, ' % (self.doc_topic) + \
+				'MADLIB_SCHEMA.newplda_sum_topic_count_agg(topics, %d) from doc_word_topic_%d group by docid' % (self.num_topic, it % 2))
+			etime = time.time()
+			plpy.info('\t\t\ttime elapsed: %.2f seconds' % (etime - stime))
+
+		def comp_word_topic(self, it):
+			stime = time.time()
+			plpy.info('\t\tcomputing per-word topic distribution...')
+			plpy.execute('truncate table %s' % (self.word_topic))
+			plpy.execute('insert into %s select wordid, ' % (self.word_topic) + \
+				'MADLIB_SCHEMA.newplda_sum_topic_count_agg(topics, %d) from doc_word_topic_%d group by wordid' % (self.num_topic, it % 2))
+			etime = time.time()
+			plpy.info('\t\t\ttime elapsed: %.2f seconds' % (etime - stime))
+
+		def comp_count_topic(self, it):
+			stime = time.time()
+			plpy.info('\t\tcomputing corpus-level topic distribution...')
+			#str_sql = 'select MADLIB_SCHEMA.newplda_sum_topic_count_agg(topics, %d) topics from doc_word_topic_%d'
+			#count_z_t = plpy.execute(str_sql % (self.num_topic, it % 2))
+			# utilize the results of comp_doc_topic (if #docs < #words) or comp_word_topic(if #docs > #words) to speedup
+			str_sql = 'select sum(topics) topics from %s'
+			count_z_t = plpy.execute(str_sql % (self.word_topic))
+        		if (count_z_t.nrows() <> 1):
+				plpy.error("error: count_z is not of the expected form")
+			etime = time.time()
+			plpy.info('\t\t\ttime elapsed: %.2f seconds' % (etime - stime))
+			return count_z_t[0]['topics']
+
+		def comp_ll(self):
+			stime = time.time()
+			plpy.info('\t\tcomputing log likelihood...')
+			ll_d = plpy.execute('select MADLIB_SCHEMA.newplda_log_likelihood_agg(topics, %f) ll from %s' % (self.alpha, self.doc_topic))
+			ll_w = plpy.execute('select MADLIB_SCHEMA.newplda_log_likelihood_agg(topics, %f) ll from %s' % (self.beta, self.word_topic))
+        		if (ll_d.nrows() <> 1 or ll_w.nrows() <> 1):
+				plpy.error('error: ll_d or ll_w is not of the expected form')
+			etime = time.time()
+			ll = ll_d[0]['ll'] + ll_w[0]['ll']
+			plpy.info('\t\t\tLL=%.2f, time elapsed: %.2f seconds' % (ll, etime - stime))
+			return ll
+
+		def iteration(self, it):  
+			stime = time.time()
+			plpy.info('iteration [%d]....' % (it))
+
+			sstime = time.time()
+			plpy.info('\t\tsampling new topics...')
+			plpy.execute('truncate table doc_word_topic_%d' % (it % 2))
+			str_sql = 'insert into doc_word_topic_%d ' + \
+				'select dwz.docid, dwz.wordid, MADLIB_SCHEMA.newplda_gibbs_sample(' + \
+				'dwz.topics, dz.topics, wz.topics, array[%s], %f, %f) ' + \
+				'from doc_word_topic_%d as dwz, %s as dz, %s as wz ' + \
+				'where dwz.docid = dz.docid and dwz.wordid = wz.wordid'
+			plpy.execute(str_sql % (it % 2, str(self.count_z)[1:-1].replace('L', ''), self.alpha, self.beta, 1 - it % 2, self.doc_topic, self.word_topic)) 
+			
+			eetime = time.time()
+			plpy.info('\t\t\ttime elapsed: %.2f seconds' % (eetime - sstime))
+
+			self.comp_doc_topic(it)
+			self.comp_word_topic(it)
+			self.count_z = self.comp_count_topic(it)
+
+			etime = time.time()
+			plpy.info('\t\ttime elapsed: %.2f seconds' % (etime - stime))
+		
+		def run(self):
+			stime = time.time()
+			if(self.init == True):
+				self.init_random()
+
+			self.comp_doc_topic(0)
+			self.comp_word_topic(0)
+			self.count_z = self.comp_count_topic(0)
+
+			old_ll = self.comp_ll()
+
+			plpy.info('start training process...')
+			for it in range(1, self.num_iter + 1):
+				self.iteration(it)
+				cur_ll = self.comp_ll()
+				diff_ll = cur_ll - old_ll
+				old_ll = cur_ll
+				plpy.info('diffLL = %.2f' % (diff_ll))
+			
+			etime = time.time()
+			plpy.info('finished, time elapsed: %.2f seconds' % (etime - stime))
+
+	plda = PLDA(dataset, num_topic, num_iter, alpha, beta, label, init)
+	plda.run()
+	return 'succeeds';
+$$ LANGUAGE plpythonu;
