@@ -286,7 +286,7 @@ RETURNS text AS $$
 			sstime = time.time()
 			plpy.info('\t\tsampling new topics...')
 			plpy.execute('TRUNCATE TABLE doc_word_topic_%d' % (it % 2))
-			str_sql = """INSERT INTO doc_word_topic_%d
+			plpy.execute("""INSERT INTO doc_word_topic_%d
 				SELECT dwz.docid, dwz.wordid,
 					MADLIB_SCHEMA.__newplda_gibbs_sample(dwz.topics, dz.topics, wz.topics, array[%s], %f, %f)
 				FROM doc_word_topic_%d AS dwz, %s AS dz, %s AS wz
