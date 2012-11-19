@@ -1,23 +1,23 @@
 m4_include(`SQLCommon.m4')
 
 CREATE OR REPLACE FUNCTION
-MADLIB_SCHEMA.newplda_random_assign(word_cnt int4, num_topic int4)
+MADLIB_SCHEMA.__newplda_random_assign(word_cnt int4, num_topic int4)
 RETURNS int4[] AS 'MODULE_PATHNAME', 'randomAssign' LANGUAGE C STRICT;
 
 CREATE OR REPLACE FUNCTION
-MADLIB_SCHEMA.newplda_gibbs_sample(topics int4[], count_d_z int4[], count_w_z int4[],
+MADLIB_SCHEMA.__newplda_gibbs_sample(topics int4[], count_d_z int4[], count_w_z int4[],
                         count_z int4[], alpha float, beta float)
 RETURNS int4[]
 AS 'MODULE_PATHNAME', 'sampleNewTopic' LANGUAGE C STRICT;
 
-CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.newplda_sum_topic_count(state int4[], topics int4[], num_topic int4)
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.__newplda_sum_topic_count(state int4[], topics int4[], num_topic int4)
 RETURNS int4[] 
 AS 'MODULE_PATHNAME', 'sumTopicCount' LANGUAGE C;
 
 DROP AGGREGATE IF EXISTS MADLIB_SCHEMA.newplda_sum_topic_count_agg(int4[], int4);
 CREATE AGGREGATE MADLIB_SCHEMA.newplda_sum_topic_count_agg(int4[], int4)
 (
-        sfunc = MADLIB_SCHEMA.newplda_sum_topic_count,
+        sfunc = MADLIB_SCHEMA.__newplda_sum_topic_count,
         stype = int4[]
 );
 
@@ -35,7 +35,7 @@ CREATE AGGREGATE MADLIB_SCHEMA.newplda_log_likelihood_agg(int4[], float8)
 
 CREATE TYPE MADLIB_SCHEMA.newplda_word_prob AS (word text, prob float8);
 
-CREATE FUNCTION MADLIB_SCHEMA.newplda_desc_single_topic(topicid int4, label text, top int4, beta float8)
+CREATE FUNCTION MADLIB_SCHEMA.newplda_get_topic_desc(topicid int4, label text, top int4, beta float8)
 RETURNS SETOF MADLIB_SCHEMA.newplda_word_prob AS $$
 	total = plpy.execute('SELECT SUM(topics[%d] + %f) total FROM word_topic_%s' % (topicid, beta, label))[0]['total']
 	return plpy.execute("""SELECT word, (topics[%d] + %f)/%f AS prob 
@@ -45,7 +45,7 @@ RETURNS SETOF MADLIB_SCHEMA.newplda_word_prob AS $$
 $$ LANGUAGE plpythonu;
 
 
-CREATE FUNCTION MADLIB_SCHEMA.newplda_desc_all_topics(num_topic int4, label text, top int4, beta float8)
+CREATE FUNCTION MADLIB_SCHEMA.newplda_get_topic_desc_all(num_topic int4, label text, top int4, beta float8)
 RETURNS text AS $$
 	plpy.execute('DROP TABLE IF EXISTS topic_desc_%s' % (label))
 	plpy.execute('CREATE TABLE topic_desc_%s(topicid int4, word text, prob float8)' % (label) \
@@ -60,7 +60,7 @@ RETURNS text AS $$
 	return "run 'SELECT * FROM topic_desc_%s order by topicid ASC, prob desc' to show results" % (label)
 $$ LANGUAGE plpythonu;
 
-CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.newplda_doc_topic_dist(topics int4[], alpha float8)
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.newplda_get_doc_topic_dist(topics int4[], alpha float8)
 RETURNS float8[] AS $$
 	global topics
 
@@ -71,7 +71,7 @@ RETURNS float8[] AS $$
 $$ LANGUAGE plpythonu;
 
 
-CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.newplda_doc_topic_main(topics int4[], alpha float8)
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.newplda_get_doc_topic_main(topics int4[], alpha float8)
 RETURNS int4[] AS $$
 	global topics
 
@@ -125,7 +125,7 @@ RETURNS text AS $$
 			plpy.info('initializing topics randomly...')
 			plpy.execute('TRUNCATE TABLE doc_word_topic_0');
 			plpy.execute("""INSERT INTO doc_word_topic_0
-				SELECT docid, wordid, MADLIB_SCHEMA.newplda_random_assign(count, %d) 
+				SELECT docid, wordid, MADLIB_SCHEMA.__newplda_random_assign(count, %d) 
 				FROM %s""" % (self.num_topic, self.dataset))
 			etime = time.time()
 			plpy.info('\t\ttime elapsed: %.2f seconds' % (etime - stime))
@@ -150,7 +150,7 @@ RETURNS text AS $$
 			plpy.execute('TRUNCATE TABLE doc_word_topic_%d' % (it % 2))
 			plpy.execute("""INSERT INTO doc_word_topic_%d
 				SELECT dwz.docid, dwz.wordid, 
-					MADLIB_SCHEMA.newplda_gibbs_sample(dwz.topics, dz.topics, wz.topics, array[%s], %f, %f)
+					MADLIB_SCHEMA.__newplda_gibbs_sample(dwz.topics, dz.topics, wz.topics, array[%s], %f, %f)
 				FROM doc_word_topic_%d AS dwz, %s AS dz, %s AS wz
 				WHERE dwz.docid = dz.docid and dwz.wordid = wz.wordid""" % \
 				(it % 2, str(self.count_z)[1:-1].replace('L', ''), self.alpha, \
@@ -224,7 +224,7 @@ RETURNS text AS $$
 			plpy.info('initializing topics randomly...')
 			plpy.execute('TRUNCATE TABLE doc_word_topic_0');
 			plpy.execute("""INSERT INTO doc_word_topic_0
-				SELECT docid, wordid, MADLIB_SCHEMA.newplda_random_assign(count, %d)
+				SELECT docid, wordid, MADLIB_SCHEMA.__newplda_random_assign(count, %d)
 				FROM %s""" % (self.num_topic, self.dataset))
 			etime = time.time()
 			plpy.info('\t\ttime elapsed: %.2f seconds' % (etime - stime))
@@ -288,7 +288,7 @@ RETURNS text AS $$
 			plpy.execute('TRUNCATE TABLE doc_word_topic_%d' % (it % 2))
 			str_sql = """INSERT INTO doc_word_topic_%d
 				SELECT dwz.docid, dwz.wordid,
-					MADLIB_SCHEMA.newplda_gibbs_sample(dwz.topics, dz.topics, wz.topics, array[%s], %f, %f)
+					MADLIB_SCHEMA.__newplda_gibbs_sample(dwz.topics, dz.topics, wz.topics, array[%s], %f, %f)
 				FROM doc_word_topic_%d AS dwz, %s AS dz, %s AS wz
 				WHERE dwz.docid = dz.docid and dwz.wordid = wz.wordid""" % \
 				(it % 2, str(self.count_z)[1:-1].replace('L', ''), self.alpha, \

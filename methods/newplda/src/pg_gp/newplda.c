@@ -19,14 +19,14 @@ PG_FUNCTION_INFO_V1(sampleNewTopic);
 PG_FUNCTION_INFO_V1(sumTopicCount);
 PG_FUNCTION_INFO_V1(logLikelihood);
 
-static float8 log_beta(float8 alpha, int32 len){
+static float8 __logBeta(float8 alpha, int32 len){
 	if (alpha <= 0 || len <= 0)
 		elog(ERROR, "Invalid parameter alpha and len for log_beta: %.f\t %d", alpha, len);
 		
 	return len * lgamma(alpha) - lgamma(len * alpha);
 }
 
-static float8 log_multi_beta(float8 * pTopics, int32 len){
+static float8 __logMultiBeta(float8 * pTopics, int32 len){
 	if (len <= 0){
 		elog(ERROR, "Invalid parameter len for log_multi_beta: %d", len);
 	}
@@ -55,7 +55,7 @@ Datum randomAssign(PG_FUNCTION_ARGS)
 		elog(ERROR, "Word count or topic number should be no less than 1.");
 
 	Datum * arr1 = palloc0(word_cnt * sizeof(Datum));
-	ArrayType *	ret_topics_arr = construct_array(arr1, word_cnt, INT4OID, 4, true, 'i');
+	ArrayType * ret_topics_arr = construct_array(arr1, word_cnt, INT4OID, 4, true, 'i');
 	int32 * ret_topics = (int32 *)ARR_DATA_PTR(ret_topics_arr);
 
 	for(int32 i = 0; i < word_cnt; i++)
@@ -78,11 +78,10 @@ Datum logLikelihood(PG_FUNCTION_ARGS)
 	for(int32 i = 0; i < num_topics; i ++)
 		x[i] = topics[i] + hyper;
 
-	ll += log_multi_beta(x, num_topics);
-	ll -= log_beta(hyper, num_topics);
+	ll += __logMultiBeta(x, num_topics);
+	ll -= __logBeta(hyper, num_topics);
 
 	pfree(x);
-
 	PG_RETURN_FLOAT8(ll);
 }
 
@@ -102,7 +101,7 @@ Datum logLikelihood(PG_FUNCTION_ARGS)
  *
  * The function is non-destructive to all the input arguments.
  */
-static int32 sampleTopic(int32 num_topics, int32 topic, int32 * count_d_z, int32 * count_w_z, int32 * count_z, float8 alpha, float8 beta) 
+static int32 __sampleTopic(int32 num_topics, int32 topic, int32 * count_d_z, int32 * count_w_z, int32 * count_z, float8 alpha, float8 beta) 
 {
 	// this array captures the cumulative prob. distribution of the topics
 	float8 * topic_prs = (float8 *)palloc(sizeof(float8) * num_topics); 
@@ -182,7 +181,7 @@ Datum sampleNewTopic(PG_FUNCTION_ARGS)
 
 	for(int32 i = 0; i < count; i++) {
 		int32 topic = topics[i];
-		int32 rtopic = sampleTopic(num_topics, topic, count_d_z, count_w_z, count_z, alpha, beta);
+		int32 rtopic = __sampleTopic(num_topics, topic, count_d_z, count_w_z, count_z, alpha, beta);
 		ret_topics[i] = rtopic;
 	}
 
