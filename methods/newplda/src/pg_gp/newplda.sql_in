@@ -35,24 +35,29 @@ CREATE AGGREGATE MADLIB_SCHEMA.newplda_log_likelihood_agg(int4[], float8)
 
 CREATE TYPE MADLIB_SCHEMA.newplda_word_prob AS (word text, prob float8);
 
-CREATE FUNCTION MADLIB_SCHEMA.newplda_desc_topic(topicid int4, label text, top int4, beta float8)
+CREATE FUNCTION MADLIB_SCHEMA.newplda_desc_single_topic(topicid int4, label text, top int4, beta float8)
 RETURNS SETOF MADLIB_SCHEMA.newplda_word_prob AS $$
-	total = plpy.execute('select SUM(topics[%d] + %f) total from word_topic_%s' % (topicid, beta, label))[0]['total']
-	return plpy.execute('SELECT word, (topics[%d] + %f)/%f AS prob FROM word_topic_%s as word_topic, vocab_%s as vocab WHERE word_topic.wordid = vocab.wordid ORDER BY prob DESC LIMIT %d' % (topicid, beta, total, label, label, top))
+	total = plpy.execute('SELECT SUM(topics[%d] + %f) total FROM word_topic_%s' % (topicid, beta, label))[0]['total']
+	return plpy.execute("""SELECT word, (topics[%d] + %f)/%f AS prob 
+		FROM word_topic_%s AS word_topic, vocab_%s AS vocab 
+		WHERE word_topic.wordid = vocab.wordid 
+		ORDER BY prob DESC LIMIT %d""" % (topicid, beta, total, label, label, top))
 $$ LANGUAGE plpythonu;
 
 
-CREATE FUNCTION MADLIB_SCHEMA.newplda_gen_topic_desc(num_topic int4, label text, top int4, beta float8)
+CREATE FUNCTION MADLIB_SCHEMA.newplda_desc_all_topics(num_topic int4, label text, top int4, beta float8)
 RETURNS text AS $$
-	plpy.execute('drop table if exists topic_desc_%s' % (label))
-	plpy.execute('create table topic_desc_%s(topicid int4, word text, prob float8)' % (label) \
-		+ m4_ifdef(`GREENPLUM', `" WITH (appendonly=true,compresstype=quicklz) distributed by (topicid)"'))
+	plpy.execute('DROP TABLE IF EXISTS topic_desc_%s' % (label))
+	plpy.execute('CREATE TABLE topic_desc_%s(topicid int4, word text, prob float8)' % (label) \
+		+ m4_ifdef(`GREENPLUM', `" WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (topicid)"'))
 	for topicid in xrange(1, num_topic + 1):
-		total = plpy.execute('select SUM(topics[%d] + %f) total from word_topic_%s' % (topicid, beta, label))[0]['total']
-		sql_str = 'INSERT INTO topic_desc_%s SELECT %d, word, (topics[%d] + %f)/%f AS prob FROM word_topic_%s as word_topic, vocab_%s as vocab ' + \
-			'WHERE word_topic.wordid = vocab.wordid ORDER BY prob DESC LIMIT %d'
-		plpy.execute(sql_str % (label, topicid, topicid, beta, total, label, label, top))
-	return "run 'select * from topic_desc_%s order by topicid asc, prob desc' to show results" % (label)
+		total = plpy.execute('SELECT SUM(topics[%d] + %f) total FROM word_topic_%s' % (topicid, beta, label))[0]['total']
+		plpy.execute("""INSERT INTO topic_desc_%s 
+			SELECT %d, word, (topics[%d] + %f)/%f AS prob 
+			FROM word_topic_%s AS word_topic, vocab_%s AS vocab
+			WHERE word_topic.wordid = vocab.wordid ORDER BY prob DESC LIMIT %d""" % \
+			(label, topicid, topicid, beta, total, label, label, top))
+	return "run 'SELECT * FROM topic_desc_%s order by topicid ASC, prob desc' to show results" % (label)
 $$ LANGUAGE plpythonu;
 
 CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.newplda_doc_topic_dist(topics int4[], alpha float8)
@@ -98,38 +103,41 @@ RETURNS text AS $$
 			self.word_topic = 'word_topic' + label
 			
 			self.doc_topic = 'doc_topic' + label + '_pred'
-			plpy.execute('drop table if exists %s' % self.doc_topic)
-			plpy.execute('create table %s(docid int4, topics int4[]) ' % (self.doc_topic) \
-				+ m4_ifdef(`GREENPLUM', `" WITH (appendonly=true,compresstype=quicklz) distributed by (docid)"'))
+			plpy.execute('DROP TABLE IF EXISTS %s' % self.doc_topic)
+			plpy.execute('CREATE TABLE %s(docid int4, topics int4[]) ' % (self.doc_topic) \
+				+ m4_ifdef(`GREENPLUM', `" WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (docid)"'))
 
-			str_sql = 'select sum(topics) topics from %s'
+			str_sql = 'SELECT sum(topics) topics FROM %s'
 			count_z_t = plpy.execute(str_sql % (self.word_topic))
         		if (count_z_t.nrows() <> 1):
 				plpy.error("error: count_z is not of the expected form")
 			self.count_z = count_z_t[0]['topics']
 
-			plpy.execute('drop table if exists doc_word_topic_0')
-			plpy.execute('create table doc_word_topic_0(docid int4, wordid int4, topics int4[])' \
-				+ m4_ifdef(`GREENPLUM', `" WITH (appendonly=true,compresstype=quicklz) distributed by (docid)"'))
-			plpy.execute('drop table if exists doc_word_topic_1')
-			plpy.execute('create table doc_word_topic_1(docid int4, wordid int4, topics int4[])' \
-				+ m4_ifdef(`GREENPLUM', `" WITH (appendonly=true,compresstype=quicklz) distributed by (docid)"'))
+			plpy.execute('DROP TABLE IF EXISTS doc_word_topic_0')
+			plpy.execute('CREATE TABLE doc_word_topic_0(docid int4, wordid int4, topics int4[])' \
+				+ m4_ifdef(`GREENPLUM', `" WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (docid)"'))
+			plpy.execute('DROP TABLE IF EXISTS doc_word_topic_1')
+			plpy.execute('CREATE TABLE doc_word_topic_1(docid int4, wordid int4, topics int4[])' \
+				+ m4_ifdef(`GREENPLUM', `" WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (docid)"'))
 
 		def init_random(self):
 			stime = time.time()
 			plpy.info('initializing topics randomly...')
-			plpy.execute('truncate table doc_word_topic_0');
-			plpy.execute('insert into doc_word_topic_0 ' + \
-				'select docid, wordid, MADLIB_SCHEMA.newplda_random_assign(count, %d) from %s' % (self.num_topic, self.dataset))
+			plpy.execute('TRUNCATE TABLE doc_word_topic_0');
+			plpy.execute("""INSERT INTO doc_word_topic_0
+				SELECT docid, wordid, MADLIB_SCHEMA.newplda_random_assign(count, %d) 
+				FROM %s""" % (self.num_topic, self.dataset))
 			etime = time.time()
 			plpy.info('\t\ttime elapsed: %.2f seconds' % (etime - stime))
 
 		def comp_doc_topic(self, it):
 			stime = time.time()
 			plpy.info('\t\tcomputing per-document topic distribution...')
-			plpy.execute('truncate table %s' % (self.doc_topic))
-			plpy.execute('insert into %s select docid, ' % (self.doc_topic) + \
-				'MADLIB_SCHEMA.newplda_sum_topic_count_agg(topics, %d) from doc_word_topic_%d group by docid' % (self.num_topic, it % 2))
+			plpy.execute('TRUNCATE TABLE %s' % (self.doc_topic))
+			plpy.execute("""INSERT INTO %s 
+				SELECT docid, MADLIB_SCHEMA.newplda_sum_topic_count_agg(topics, %d) 
+				FROM doc_word_topic_%d 
+				GROUP BY docid""" % (self.doc_topic, self.num_topic, it % 2))
 			etime = time.time()
 			plpy.info('\t\t\ttime elapsed: %.2f seconds' % (etime - stime))
 
@@ -139,13 +147,14 @@ RETURNS text AS $$
 
 			sstime = time.time()
 			plpy.info('\t\tsampling new topics...')
-			plpy.execute('truncate table doc_word_topic_%d' % (it % 2))
-			str_sql = 'insert into doc_word_topic_%d ' + \
-				'select dwz.docid, dwz.wordid, MADLIB_SCHEMA.newplda_gibbs_sample(' + \
-				'dwz.topics, dz.topics, wz.topics, array[%s], %f, %f) ' + \
-				'from doc_word_topic_%d as dwz, %s as dz, %s as wz ' + \
-				'where dwz.docid = dz.docid and dwz.wordid = wz.wordid'
-			plpy.execute(str_sql % (it % 2, str(self.count_z)[1:-1].replace('L', ''), self.alpha, self.beta, 1 - it % 2, self.doc_topic, self.word_topic)) 
+			plpy.execute('TRUNCATE TABLE doc_word_topic_%d' % (it % 2))
+			plpy.execute("""INSERT INTO doc_word_topic_%d
+				SELECT dwz.docid, dwz.wordid, 
+					MADLIB_SCHEMA.newplda_gibbs_sample(dwz.topics, dz.topics, wz.topics, array[%s], %f, %f)
+				FROM doc_word_topic_%d AS dwz, %s AS dz, %s AS wz
+				WHERE dwz.docid = dz.docid and dwz.wordid = wz.wordid""" % \
+				(it % 2, str(self.count_z)[1:-1].replace('L', ''), self.alpha, \
+				self.beta, 1 - it % 2, self.doc_topic, self.word_topic)) 
 			eetime = time.time()
 			plpy.info('\t\t\ttime elapsed: %.2f seconds' % (eetime - sstime))
 
@@ -155,7 +164,6 @@ RETURNS text AS $$
 		
 		def run(self):
 			stime = time.time()
-
 			# initialize
 			self.init_random()
 			self.comp_doc_topic(0)
@@ -198,53 +206,58 @@ RETURNS text AS $$
 			self.init = init
 
 			if self.init == True:
-				plpy.execute('drop table if exists doc_word_topic_0')
-				plpy.execute('create table doc_word_topic_0(docid int4, wordid int4, topics int4[])' \
-					+ m4_ifdef(`GREENPLUM', `" WITH (appendonly=true,compresstype=quicklz) distributed by (docid)"'))
-				plpy.execute('drop table if exists doc_word_topic_1')
-				plpy.execute('create table doc_word_topic_1(docid int4, wordid int4, topics int4[])' \
-					+ m4_ifdef(`GREENPLUM', `" WITH (appendonly=true,compresstype=quicklz) distributed by (docid)"'))
-				plpy.execute('drop table if exists %s' % self.doc_topic)
-				plpy.execute('create table %s(docid int4, topics int4[]) ' % (self.doc_topic) \
-					+ m4_ifdef(`GREENPLUM', `" WITH (appendonly=true,compresstype=quicklz) distributed by (docid)"'))
-				plpy.execute('drop table if exists %s' % (self.word_topic))
-				plpy.execute('create table %s(wordid int4, topics int4[]) ' % (self.word_topic) \
-					+ m4_ifdef(`GREENPLUM', `" WITH (appendonly=true,compresstype=quicklz) distributed by (wordid)"'))
+				plpy.execute('DROP TABLE IF EXISTS doc_word_topic_0')
+				plpy.execute('CREATE TABLE doc_word_topic_0(docid int4, wordid int4, topics int4[])' \
+					+ m4_ifdef(`GREENPLUM', `" WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (docid)"'))
+				plpy.execute('DROP TABLE IF EXISTS doc_word_topic_1')
+				plpy.execute('CREATE TABLE doc_word_topic_1(docid int4, wordid int4, topics int4[])' \
+					+ m4_ifdef(`GREENPLUM', `" WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (docid)"'))
+				plpy.execute('DROP TABLE IF EXISTS %s' % self.doc_topic)
+				plpy.execute('CREATE TABLE %s(docid int4, topics int4[]) ' % (self.doc_topic) \
+					+ m4_ifdef(`GREENPLUM', `" WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (docid)"'))
+				plpy.execute('DROP TABLE IF EXISTS %s' % (self.word_topic))
+				plpy.execute('CREATE TABLE %s(wordid int4, topics int4[]) ' % (self.word_topic) \
+					+ m4_ifdef(`GREENPLUM', `" WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (wordid)"'))
 
 		def init_random(self):
 			stime = time.time()
 			plpy.info('initializing topics randomly...')
-			plpy.execute('truncate table doc_word_topic_0');
-			plpy.execute('insert into doc_word_topic_0 ' + \
-				'select docid, wordid, MADLIB_SCHEMA.newplda_random_assign(count, %d) from %s' % (self.num_topic, self.dataset))
+			plpy.execute('TRUNCATE TABLE doc_word_topic_0');
+			plpy.execute("""INSERT INTO doc_word_topic_0
+				SELECT docid, wordid, MADLIB_SCHEMA.newplda_random_assign(count, %d)
+				FROM %s""" % (self.num_topic, self.dataset))
 			etime = time.time()
 			plpy.info('\t\ttime elapsed: %.2f seconds' % (etime - stime))
 
 		def comp_doc_topic(self, it):
 			stime = time.time()
 			plpy.info('\t\tcomputing per-document topic distribution...')
-			plpy.execute('truncate table %s' % (self.doc_topic))
-			plpy.execute('insert into %s select docid, ' % (self.doc_topic) + \
-				'MADLIB_SCHEMA.newplda_sum_topic_count_agg(topics, %d) from doc_word_topic_%d group by docid' % (self.num_topic, it % 2))
+			plpy.execute('TRUNCATE TABLE %s' % (self.doc_topic))
+			plpy.execute("""INSERT INTO %s
+				SELECT docid, MADLIB_SCHEMA.newplda_sum_topic_count_agg(topics, %d)
+				FROM doc_word_topic_%d
+				GROUP BY docid""" % (self.doc_topic, self.num_topic, it % 2))
 			etime = time.time()
 			plpy.info('\t\t\ttime elapsed: %.2f seconds' % (etime - stime))
 
 		def comp_word_topic(self, it):
 			stime = time.time()
 			plpy.info('\t\tcomputing per-word topic distribution...')
-			plpy.execute('truncate table %s' % (self.word_topic))
-			plpy.execute('insert into %s select wordid, ' % (self.word_topic) + \
-				'MADLIB_SCHEMA.newplda_sum_topic_count_agg(topics, %d) from doc_word_topic_%d group by wordid' % (self.num_topic, it % 2))
+			plpy.execute('TRUNCATE TABLE %s' % (self.word_topic))
+			plpy.execute("""INSERT INTO %s
+				SELECT wordid, MADLIB_SCHEMA.newplda_sum_topic_count_agg(topics, %d)
+				FROM doc_word_topic_%d 
+				GROUP BY wordid""" % (self.word_topic, self.num_topic, it % 2))
 			etime = time.time()
 			plpy.info('\t\t\ttime elapsed: %.2f seconds' % (etime - stime))
 
 		def comp_count_topic(self, it):
 			stime = time.time()
 			plpy.info('\t\tcomputing corpus-level topic distribution...')
-			#str_sql = 'select MADLIB_SCHEMA.newplda_sum_topic_count_agg(topics, %d) topics from doc_word_topic_%d'
+			#str_sql = 'SELECT MADLIB_SCHEMA.newplda_sum_topic_count_agg(topics, %d) topics FROM doc_word_topic_%d'
 			#count_z_t = plpy.execute(str_sql % (self.num_topic, it % 2))
 			# utilize the results of comp_doc_topic (if #docs < #words) or comp_word_topic(if #docs > #words) to speedup
-			str_sql = 'select sum(topics) topics from %s'
+			str_sql = 'SELECT sum(topics) topics FROM %s'
 			count_z_t = plpy.execute(str_sql % (self.word_topic))
         		if (count_z_t.nrows() <> 1):
 				plpy.error("error: count_z is not of the expected form")
@@ -255,8 +268,10 @@ RETURNS text AS $$
 		def comp_ll(self):
 			stime = time.time()
 			plpy.info('\t\tcomputing log likelihood...')
-			ll_d = plpy.execute('select MADLIB_SCHEMA.newplda_log_likelihood_agg(topics, %f) ll from %s' % (self.alpha, self.doc_topic))
-			ll_w = plpy.execute('select MADLIB_SCHEMA.newplda_log_likelihood_agg(topics, %f) ll from %s' % (self.beta, self.word_topic))
+			ll_d = plpy.execute("""SELECT MADLIB_SCHEMA.newplda_log_likelihood_agg(topics, %f) ll
+				FROM %s""" % (self.alpha, self.doc_topic))
+			ll_w = plpy.execute("""SELECT MADLIB_SCHEMA.newplda_log_likelihood_agg(topics, %f) ll
+				FROM %s""" % (self.beta, self.word_topic))
         		if (ll_d.nrows() <> 1 or ll_w.nrows() <> 1):
 				plpy.error('error: ll_d or ll_w is not of the expected form')
 			etime = time.time()
@@ -270,13 +285,14 @@ RETURNS text AS $$
 
 			sstime = time.time()
 			plpy.info('\t\tsampling new topics...')
-			plpy.execute('truncate table doc_word_topic_%d' % (it % 2))
-			str_sql = 'insert into doc_word_topic_%d ' + \
-				'select dwz.docid, dwz.wordid, MADLIB_SCHEMA.newplda_gibbs_sample(' + \
-				'dwz.topics, dz.topics, wz.topics, array[%s], %f, %f) ' + \
-				'from doc_word_topic_%d as dwz, %s as dz, %s as wz ' + \
-				'where dwz.docid = dz.docid and dwz.wordid = wz.wordid'
-			plpy.execute(str_sql % (it % 2, str(self.count_z)[1:-1].replace('L', ''), self.alpha, self.beta, 1 - it % 2, self.doc_topic, self.word_topic)) 
+			plpy.execute('TRUNCATE TABLE doc_word_topic_%d' % (it % 2))
+			str_sql = """INSERT INTO doc_word_topic_%d
+				SELECT dwz.docid, dwz.wordid,
+					MADLIB_SCHEMA.newplda_gibbs_sample(dwz.topics, dz.topics, wz.topics, array[%s], %f, %f)
+				FROM doc_word_topic_%d AS dwz, %s AS dz, %s AS wz
+				WHERE dwz.docid = dz.docid and dwz.wordid = wz.wordid""" % \
+				(it % 2, str(self.count_z)[1:-1].replace('L', ''), self.alpha, \
+				self.beta, 1 - it % 2, self.doc_topic, self.word_topic)) 
 			
 			eetime = time.time()
 			plpy.info('\t\t\ttime elapsed: %.2f seconds' % (eetime - sstime))

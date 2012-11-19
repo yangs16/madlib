@@ -98,11 +98,11 @@ Datum logLikelihood(PG_FUNCTION_ARGS)
  *  @param count_d_z	the distribution of topics in the current document
  *  @param count_z	the distribution of number of words in the corpus assigned to each topic
  *  @param alpha	the Dirichlet parameter for the topic multinomial
- *  @param eta		the Dirichlet parameter for the per-topic word multinomial
+ *  @param beta		the Dirichlet parameter for the per-topic word multinomial
  *
  * The function is non-destructive to all the input arguments.
  */
-static int32 sampleTopic(int32 num_topics, int32 topic, int32 * count_d_z, int32 * count_w_z, int32 * count_z, float8 alpha, float8 eta) 
+static int32 sampleTopic(int32 num_topics, int32 topic, int32 * count_d_z, int32 * count_w_z, int32 * count_z, float8 alpha, float8 beta) 
 {
 	// this array captures the cumulative prob. distribution of the topics
 	float8 * topic_prs = (float8 *)palloc(sizeof(float8) * num_topics); 
@@ -122,7 +122,7 @@ static int32 sampleTopic(int32 num_topics, int32 topic, int32 * count_d_z, int32
 		}
 
 		// probability
-		float unpr = (ndz + alpha) * (nwz + eta) / (nz + num_topics * eta);
+		float unpr = (ndz + alpha) * (nwz + beta) / (nz + num_topics * beta);
 		total_unpr += unpr;
 		topic_prs[i] = total_unpr;
 	}
@@ -170,7 +170,7 @@ Datum sampleNewTopic(PG_FUNCTION_ARGS)
 	int32 * count_z = (int32 *)ARR_DATA_PTR(arr_count_z);
 
 	float8 alpha = PG_GETARG_FLOAT8(4);
-	float8 eta = PG_GETARG_FLOAT8(5);
+	float8 beta = PG_GETARG_FLOAT8(5);
 
 	ArrayType * ret_topics_arr;
 	int32 * ret_topics;
@@ -182,7 +182,7 @@ Datum sampleNewTopic(PG_FUNCTION_ARGS)
 
 	for(int32 i = 0; i < count; i++) {
 		int32 topic = topics[i];
-		int32 rtopic = sampleTopic(num_topics, topic, count_d_z, count_w_z, count_z, alpha, eta);
+		int32 rtopic = sampleTopic(num_topics, topic, count_d_z, count_w_z, count_z, alpha, beta);
 		ret_topics[i] = rtopic;
 	}
 
