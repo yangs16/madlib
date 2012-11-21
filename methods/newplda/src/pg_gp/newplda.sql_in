@@ -10,14 +10,19 @@ MADLIB_SCHEMA.__newplda_gibbs_sample(topics int4[], count_d_z int4[], count_w_z 
 RETURNS int4[]
 AS 'MODULE_PATHNAME', 'sampleNewTopic' LANGUAGE C STRICT;
 
-CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.__newplda_sum_topic_count(state int4[], topics int4[], num_topic int4)
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.__newplda_sum_topic_count_sfunc(state int4[], topics int4[], num_topic int4)
 RETURNS int4[] 
 AS 'MODULE_PATHNAME', 'sumTopicCount' LANGUAGE C;
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.__newplda_sum_topic_count_prefunc(state1 int4[], state2 int4[])
+RETURNS int4[] 
+AS 'MODULE_PATHNAME', 'intArrayAdd' LANGUAGE C STRICT;
 
 DROP AGGREGATE IF EXISTS MADLIB_SCHEMA.newplda_sum_topic_count_agg(int4[], int4);
 CREATE AGGREGATE MADLIB_SCHEMA.newplda_sum_topic_count_agg(int4[], int4)
 (
-        sfunc = MADLIB_SCHEMA.__newplda_sum_topic_count,
+        sfunc = MADLIB_SCHEMA.__newplda_sum_topic_count_sfunc,
+	m4_ifdef(`GREENPLUM', `prefunc = MADLIB_SCHEMA.__newplda_sum_topic_count_prefunc,')
         stype = int4[]
 );
 

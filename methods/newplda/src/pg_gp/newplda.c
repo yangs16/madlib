@@ -17,6 +17,7 @@ PG_MODULE_MAGIC;
 PG_FUNCTION_INFO_V1(randomAssign);
 PG_FUNCTION_INFO_V1(sampleNewTopic);
 PG_FUNCTION_INFO_V1(sumTopicCount);
+PG_FUNCTION_INFO_V1(intArrayAdd);
 PG_FUNCTION_INFO_V1(logLikelihood);
 
 static float8 __logBeta(float8 alpha, int32 len){
@@ -216,4 +217,19 @@ Datum sumTopicCount(PG_FUNCTION_ARGS)
 	}
 
 	PG_RETURN_ARRAYTYPE_P(arr_state);
+}
+
+Datum intArrayAdd(PG_FUNCTION_ARGS);
+Datum intArrayAdd(PG_FUNCTION_ARGS)
+{
+	ArrayType * arr_state1 = PG_GETARG_ARRAYTYPE_P(0);
+	ArrayType * arr_state2 = PG_GETARG_ARRAYTYPE_P(1);
+	int32 * state1 = (int32 *)ARR_DATA_PTR(arr_state1);
+	int32 * state2 = (int32 *)ARR_DATA_PTR(arr_state2);
+	int32 count = ARR_DIMS(arr_state1)[0];
+
+	for(int32 i = 0; i < count; i++) {
+		state1[i] += state2[i];
+	}
+	PG_RETURN_ARRAYTYPE_P(arr_state1);
 }
