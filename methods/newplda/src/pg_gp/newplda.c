@@ -22,6 +22,160 @@ PG_FUNCTION_INFO_V1(logLikelihood);
 
 /************************************************************************ 
  * Begin: Experiment with window function to transfer states between rows 
+ * Using encoded int32 array should be more efficient 
+*************************************************************************/ 
+PG_FUNCTION_INFO_V1(sFunc4GibbsWFuncFast);
+PG_FUNCTION_INFO_V1(fFunc4GibbsWFuncFast);
+
+Datum fFunc4GibbsWFuncFast(PG_FUNCTION_ARGS);
+Datum fFunc4GibbsWFuncFast(PG_FUNCTION_ARGS)
+{
+
+	ArrayType * arr_state = PG_GETARG_ARRAYTYPE_P(0);
+	int32 * state = (int32 *)ARR_DATA_PTR(arr_state);
+
+	int32 docid = state[0];
+	int32 wordid = state[1];
+	int32 tcount = state[2];
+
+	ArrayType * arr_res = construct_array(NULL, (tcount + 2), INT4OID, 4, true, 'i');
+	int32 * res = (int32 *)ARR_DATA_PTR(arr_res);
+	res[0] = docid;
+	res[1] = wordid;
+	memcpy(res + 2, state + 3, tcount * sizeof(int32));
+
+	PG_RETURN_ARRAYTYPE_P(arr_res);
+}
+
+/**
+ * state int4[]
+ * docid int4, wordid int4, topics int4[], 
+ * count_d_z int4[], count_w_z int4[], count_z int4[], 
+ * alpha float, beta float,
+ * wcount int4, zcount int4)
+**/
+static int32 __sampleTopic(int32, int32, int32 *, int32 *, int32 *, float8, float8); 
+
+typedef struct {
+	int32 * docid;
+	int32 * wordid;
+	int32 * tcount;
+	int32 * topics;
+	int32 * corpus_topic;
+	int32 * doc_topic;
+	int32 * word_topic;
+	int32 * wlist;
+} __gibbs_state_fast;
+
+#define TCOUNT 100
+Datum sFunc4GibbsWFuncFast(PG_FUNCTION_ARGS);
+Datum sFunc4GibbsWFuncFast(PG_FUNCTION_ARGS)
+{
+	__gibbs_state_fast gsf;
+
+	int32 docid = PG_GETARG_INT32(1);
+	int32 wordid = PG_GETARG_INT32(2);
+
+	ArrayType * arr_topics = PG_GETARG_ARRAYTYPE_P(3);
+	ArrayType * arr_c_d_z = PG_GETARG_ARRAYTYPE_P(4);
+	ArrayType * arr_c_w_z = PG_GETARG_ARRAYTYPE_P(5);
+	ArrayType * arr_c_z = PG_GETARG_ARRAYTYPE_P(6);
+
+ 	int32 * topics = (int32 *)ARR_DATA_PTR(arr_topics);
+ 	int32 * c_d_z = (int32 *)ARR_DATA_PTR(arr_c_d_z);
+ 	int32 * c_w_z = (int32 *)ARR_DATA_PTR(arr_c_w_z);
+ 	int32 * c_z = (int32 *)ARR_DATA_PTR(arr_c_z);
+
+	float8 alpha = PG_GETARG_FLOAT8(7);
+	float8 beta = PG_GETARG_FLOAT8(8);
+	int32 wcount = PG_GETARG_INT32(9);
+	int32 zcount = PG_GETARG_INT32(10);
+ 	int32 tcount  = ARR_DIMS(arr_topics)[0];
+	if(tcount > TCOUNT)
+		tcount = TCOUNT;
+	
+	ArrayType * arr_return_state;
+	int32 state_array_len = 3 + TCOUNT + 2 * zcount + wcount * zcount + wcount;
+	int32 topics_offset = 3;
+	int32 corpus_topic_offset = 3 + TCOUNT;
+	int32 doc_topic_offset = 3 + TCOUNT + zcount;
+	int32 word_topic_offset = 3 + TCOUNT + 2 * zcount;
+	int32 wlist_offset = 3 + TCOUNT + 2 * zcount + wcount * zcount; 
+
+	if(PG_ARGISNULL(0)){
+		arr_return_state = construct_array(NULL, state_array_len, INT4OID, 4, true, 'i');
+		int32 * return_state = (int32 *) ARR_DATA_PTR(arr_return_state);
+		
+		gsf.docid = return_state;
+		gsf.wordid = return_state + 1;
+		gsf.tcount = return_state + 2;
+		gsf.topics = return_state + topics_offset;
+		gsf.corpus_topic = return_state + corpus_topic_offset;
+		gsf.doc_topic = return_state + doc_topic_offset;
+		gsf.word_topic = return_state + word_topic_offset;
+		gsf.wlist = return_state + wlist_offset;
+
+		*(gsf.docid) = docid;
+		*(gsf.wordid) = wordid;
+		*(gsf.tcount) = tcount;
+		memcpy(gsf.topics, topics, tcount * sizeof(int32));
+		memcpy(gsf.corpus_topic, c_z, zcount * sizeof(int32));
+		memcpy(gsf.doc_topic, c_d_z, zcount * sizeof(int32));
+		memcpy(gsf.word_topic + wordid * zcount, c_w_z, zcount * sizeof(int32));
+		gsf.wlist[wordid] = 1;
+	}else{
+		arr_return_state = PG_GETARG_ARRAYTYPE_P(0);
+		int32 * return_state = (int32 *)ARR_DATA_PTR(arr_return_state);
+
+		gsf.docid = return_state;
+		gsf.wordid = return_state + 1;
+		gsf.tcount = return_state + 2;
+		gsf.topics = return_state + topics_offset;
+		gsf.corpus_topic = return_state + corpus_topic_offset;
+		gsf.doc_topic = return_state + doc_topic_offset;
+		gsf.word_topic = return_state + word_topic_offset;
+		gsf.wlist = return_state + wlist_offset;
+
+		*(gsf.wordid) = wordid;
+		*(gsf.tcount) = tcount;
+		if (docid != *(gsf.docid)){
+			memcpy(gsf.doc_topic, c_d_z, zcount * sizeof(int32));
+			*(gsf.docid) = docid;
+		}
+
+		if(gsf.wlist[wordid] < 1){
+			memcpy(gsf.word_topic + wordid * zcount, c_w_z, zcount * sizeof(int32));
+			gsf.wlist[wordid] = 1;
+			*(gsf.wordid) = wordid;
+		}
+	}
+
+	int32 * new_topics = (int32 *)palloc(tcount * sizeof(int32));
+	for(int32 i = 0; i < tcount; i++) {
+		int32 topic = topics[i];
+		int32 retopic = __sampleTopic(zcount, topic, gsf.doc_topic, gsf.word_topic + wordid * zcount, gsf.corpus_topic, alpha, beta);
+		new_topics[i] = retopic;
+
+		gsf.corpus_topic[topic]--;
+		gsf.corpus_topic[retopic]++;
+		gsf.doc_topic[topic]--;
+		gsf.doc_topic[retopic]++;
+		gsf.word_topic[wordid * zcount + topic]--;
+		gsf.word_topic[wordid * zcount + retopic]++;
+	}
+
+	memcpy(gsf.topics, new_topics, tcount * sizeof(int32));
+	pfree(new_topics);
+
+	PG_RETURN_ARRAYTYPE_P(arr_return_state);
+}
+/************************************************************************ 
+ * End
+ ************************************************************************/ 
+
+/************************************************************************ 
+ * Begin: Experiment with window function to transfer states between rows 
+ * Using tuple to handle composite type, very slow and inefficient
 *************************************************************************/ 
 PG_FUNCTION_INFO_V1(sFunc4GibbsWFunc);
 PG_FUNCTION_INFO_V1(fFunc4GibbsWFunc);
@@ -41,9 +195,9 @@ Datum fFunc4GibbsWFunc(PG_FUNCTION_ARGS)
 
 	TupleDesc tupdesc;
 	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
-            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+           	ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                      errmsg("function returning record called in context "
-                            "that cannot accept type record")));
+                       	    "that cannot accept type record")));
 	tupdesc = BlessTupleDesc(tupdesc);
 
 	bool isnulls[3] = {false, false, false};
@@ -88,10 +242,10 @@ Datum sFunc4GibbsWFunc(PG_FUNCTION_ARGS)
 	ArrayType * arr_c_w_z = PG_GETARG_ARRAYTYPE_P(5);
 	ArrayType * arr_c_z = PG_GETARG_ARRAYTYPE_P(6);
 
- 	int32 * topics = (int32 *)arr_topics;
- 	int32 * c_d_z = (int32 *)arr_c_d_z;
- 	int32 * c_w_z = (int32 *)arr_c_w_z;
- 	int32 * c_z = (int32 *)arr_c_z;
+ 	int32 * topics = (int32 *)ARR_DATA_PTR(arr_topics);
+ 	int32 * c_d_z = (int32 *)ARR_DATA_PTR(arr_c_d_z);
+ 	int32 * c_w_z = (int32 *)ARR_DATA_PTR(arr_c_w_z);
+ 	int32 * c_z = (int32 *)ARR_DATA_PTR(arr_c_z);
 
 	float8 alpha = PG_GETARG_FLOAT8(7);
 	float8 beta = PG_GETARG_FLOAT8(8);
@@ -102,31 +256,25 @@ Datum sFunc4GibbsWFunc(PG_FUNCTION_ARGS)
 	if(PG_ARGISNULL(0)){
 		state.docid = docid;
 
-		Datum * datum = palloc0(zcount * sizeof(int32));
-		ArrayType * arr = construct_array(datum, zcount, INT4OID, 4, true, 'i');
+		ArrayType * arr = construct_array(NULL, zcount, INT4OID, 4, true, 'i');
 		state.arr_c_z = arr;
 		state.c_z = (int32 *)ARR_DATA_PTR(arr);
 		memcpy(state.c_z, c_z, zcount * sizeof(int32));
 
-		datum = palloc0(zcount * sizeof(int32));
-		arr = construct_array(datum, zcount, INT4OID, 4, true, 'i');
+		arr = construct_array(NULL, zcount, INT4OID, 4, true, 'i');
 		state.arr_c_d_z = arr;
 		state.c_d_z = (int32 *)ARR_DATA_PTR(arr);
 		memcpy(state.c_d_z, c_d_z, zcount * sizeof(int32));
 
-		datum = palloc0(wcount * zcount * sizeof(int32));
-		arr = construct_array(datum, wcount * zcount, INT4OID, 4, true, 'i');
+		arr = construct_array(NULL, wcount * zcount, INT4OID, 4, true, 'i');
 		state.arr_c_w_z = arr;
 		state.c_w_z = (int32 *)ARR_DATA_PTR(arr);
-		memset(state.c_w_z, 0, wcount * zcount * sizeof(int32));
-		memcpy(state.c_w_z + wordid * zcount * sizeof(int32), c_w_z, zcount * sizeof(int32));
+		memcpy(state.c_w_z + wordid * zcount, c_w_z, zcount * sizeof(int32));
 
-		datum = palloc0(wcount * sizeof(int32));
-		arr = construct_array(datum, wcount, INT4OID, 4, true, 'i');
+		arr = construct_array(NULL, wcount, INT4OID, 4, true, 'i');
 		state.arr_wlist = arr;
 		state.wlist = (int32 *)ARR_DATA_PTR(arr);
-		memset(state.wlist, -1, wcount * sizeof(int32));
-		state.wlist[wordid] = 0;
+		state.wlist[wordid] = 1;
 	}else{
 		HeapTupleHeader tuphead = PG_GETARG_HEAPTUPLEHEADER(0);
 		bool isnull;
@@ -147,16 +295,14 @@ Datum sFunc4GibbsWFunc(PG_FUNCTION_ARGS)
 
 		state.arr_c_w_z = DatumGetArrayTypeP(GetAttributeByName(tuphead, "word_topic", &isnull));
 		state.c_w_z = (int32 *)ARR_DATA_PTR(state.arr_c_w_z);
-		if(state.wlist[wordid] < 0){
-			memcpy(state.c_w_z + wordid * zcount * sizeof(int32), c_w_z, zcount * sizeof(int32));
-			state.wlist[wordid] = 0;
+		if(state.wlist[wordid] < 1){
+			memcpy(state.c_w_z + wordid * zcount, c_w_z, zcount * sizeof(int32));
+			state.wlist[wordid] = 1;
 		}
 	}
 
-	Datum * datum = palloc0(tcount * sizeof(int32));
-	ArrayType * arr_result_topics = construct_array(datum, tcount, INT4OID, 4, true, 'i');
+	ArrayType * arr_result_topics = construct_array(NULL, tcount, INT4OID, 4, true, 'i');
 	int32 * result_topics = (int32 *)ARR_DATA_PTR(arr_result_topics);
-
 	for(int32 i = 0; i < tcount; i++) {
 		int32 topic = topics[i];
 		int32 retopic = __sampleTopic(zcount, topic, state.c_d_z, state.c_w_z + wordid * zcount, state.c_z, alpha, beta);
@@ -172,10 +318,10 @@ Datum sFunc4GibbsWFunc(PG_FUNCTION_ARGS)
 
 	TupleDesc tupdesc;
 	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
-            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                     errmsg("function returning record called in context "
-                            "that cannot accept type record")));
-	tupdesc = BlessTupleDesc(tupdesc);
+		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+			errmsg("function returning record called in context "
+                        	    "that cannot accept type record")));
+	tupdesc= BlessTupleDesc(tupdesc);
 
 	Datum values[7];
 	values[0] = Int32GetDatum(state.docid);
@@ -230,8 +376,7 @@ Datum randomAssign(PG_FUNCTION_ARGS)
 	if(wcount < 0 || zcount < 0)
 		elog(ERROR, "Word count or topic number should be no less than 1.");
 
-	Datum * datum = palloc0(wcount * sizeof(int32));
-	ArrayType * arr = construct_array(datum, wcount, INT4OID, 4, true, 'i');
+	ArrayType * arr = construct_array(NULL, wcount, INT4OID, 4, true, 'i');
 	int32 * result = (int32 *)ARR_DATA_PTR(arr);
 
 	for(int32 i = 0; i < wcount; i++)
@@ -351,8 +496,7 @@ Datum sampleNewTopic(PG_FUNCTION_ARGS)
 	int32 * ret_topics;
 
 	int32 count = ARR_DIMS(arr_topics)[0];
-	Datum * arr1 = palloc0(count * sizeof(int32));
-	ret_topics_arr = construct_array(arr1, count, INT4OID, 4, true, 'i');
+	ret_topics_arr = construct_array(NULL, count, INT4OID, 4, true, 'i');
 	ret_topics = (int32 *)ARR_DATA_PTR(ret_topics_arr);
 
 	for(int32 i = 0; i < count; i++) {
@@ -375,10 +519,8 @@ Datum sumTopicCount(PG_FUNCTION_ARGS)
 	ArrayType * arr_state;
 	int32 * state;
 	if (PG_ARGISNULL(0)) {
-		Datum * datum = palloc0(num_topics * sizeof(int32));
-		arr_state = construct_array(datum, num_topics, INT4OID, 4, true, 'i');
+		arr_state = construct_array(NULL, num_topics, INT4OID, 4, true, 'i');
 		state = (int32 *)ARR_DATA_PTR(arr_state);
-		memset(state, 0, num_topics * sizeof(int32));
 	} else {
 		arr_state = PG_GETARG_ARRAYTYPE_P(0);
 		state = (int32 *)ARR_DATA_PTR(arr_state);

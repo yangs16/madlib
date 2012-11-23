@@ -10,7 +10,47 @@ CREATE OR REPLACE FUNCTION
 RETURNS int4[]
 AS 'MODULE_PATHNAME', 'sampleNewTopic' LANGUAGE C STRICT;
 
-----
+-- Using encoded array to transfer state should be more efficient
+-- begin: expeirment with window function to transfer states between rows - we can update doc_topic and word_topic matrixes immedidately after sampling a new topic for each word
+-- Encoded int4 array for storing STATE info:
+--	docid int4
+--	wordid int4
+--	tcount int4
+--	topics int4[]
+--	corpus_topic int4[]
+--	doc_topic int4[]
+--	word_topic int4[]
+--	wlist int4[]
+CREATE OR REPLACE FUNCTION
+	MADLIB_SCHEMA.__newplda_gibbs_sfunc_fast(state int[], docid int4, wordid int4, topics int4[], count_d_z int4[], count_w_z int4[],
+                        count_z int4[], alpha float, beta float, vocab_size int4, num_topic int4)
+RETURNS int4[] 
+AS 'MODULE_PATHNAME', 'sFunc4GibbsWFuncFast' LANGUAGE C;
+
+-- Encoded int4 array for storing FINAL STATE info:
+--	docid int4,
+--	wordid int4,
+--	topics int4[],
+CREATE OR REPLACE FUNCTION
+	MADLIB_SCHEMA.__newplda_gibbs_ffunc_fast(state int4[])
+RETURNS int4[]
+AS 'MODULE_PATHNAME', 'fFunc4GibbsWFuncFast' LANGUAGE C STRICT;
+
+--docid int4, wordid int4, topics int4[], 
+--count_d_z int4[], count_w_z int4[], count_z int4[],
+--alpha float, beta float, vocab_size int4, num_topic int4
+DROP AGGREGATE IF EXISTS MADLIB_SCHEMA.newplda_gibbs_wfunc_fast(int4, int4, int4[], int4[], int4[], int4[], float, float, int4, int4);
+CREATE AGGREGATE MADLIB_SCHEMA.__newplda_gibbs_wfunc_fast(int4, int4, int4[], 
+			int4[], int4[], int4[],
+			float, float, int4, int4)
+(
+        sfunc = MADLIB_SCHEMA.__newplda_gibbs_sfunc_fast,
+	finalfunc = MADLIB_SCHEMA.__newplda_gibbs_ffunc_fast,
+        stype = int4[] 
+);
+-- end 
+
+-- Using composity type to pass state is very slow and inefficient
 -- begin: expeirment with window function to transfer states between rows - we can update doc_topic and word_topic matrixes immedidately after sampling a new topic for each word
 DROP TYPE IF EXISTS MADLIB_SCHEMA.__newplda_gibbs_state CASCADE;
 CREATE TYPE MADLIB_SCHEMA.__newplda_gibbs_state
@@ -255,6 +295,7 @@ RETURNS text AS $$
 				label = '_' + label.strip()
 			self.doc_topic = 'doc_topic' + label
 			self.word_topic = 'word_topic' + label
+			self.pre_joined = 'pre_joined' + label
 			
 			self.init = init
 			if self.init == True:
@@ -265,11 +306,15 @@ RETURNS text AS $$
 				plpy.execute('CREATE TABLE doc_word_topic_1(docid int4, wordid int4, topics int4[])' \
 					+ m4_ifdef(`GREENPLUM', `" WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (docid)"'))
 				plpy.execute('DROP TABLE IF EXISTS %s' % self.doc_topic)
-				plpy.execute('CREATE TABLE %s(docid int4, topics int4[]) ' % (self.doc_topic) \
+				plpy.execute('CREATE TABLE %s(docid int4, topics int4[])' % (self.doc_topic) \
 					+ m4_ifdef(`GREENPLUM', `" WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (docid)"'))
 				plpy.execute('DROP TABLE IF EXISTS %s' % (self.word_topic))
-				plpy.execute('CREATE TABLE %s(wordid int4, topics int4[]) ' % (self.word_topic) \
+				plpy.execute('CREATE TABLE %s(wordid int4, topics int4[])' % (self.word_topic) \
 					+ m4_ifdef(`GREENPLUM', `" WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (wordid)"'))
+				plpy.execute('DROP TABLE IF EXISTS %s' % (self.pre_joined))
+				plpy.execute("""CREATE TEMP TABLE %s (docid int4, wordid int4, topics int4[],
+					doc_topic int4[], word_topic int4[], corpus_topic int4[])""" % (self.pre_joined) \
+					+ m4_ifdef(`GREENPLUM', `" WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (docid)"'))
 
 			plpy.info('counting size of vocabulary...')
 			stime = time.time()
@@ -284,6 +329,7 @@ RETURNS text AS $$
 			self.vocab_size = wcount_t[0]['wcount']
 			etime = time.time()
 			plpy.info('\t\t\ttime elapsed: %.2f seconds' % (etime - stime))
+
 		def init_random(self):
 			stime = time.time()
 			plpy.info('initializing topics randomly...')
@@ -347,26 +393,67 @@ RETURNS text AS $$
 		def iteration_wfunc(self, it):  
 			stime = time.time()
 			plpy.info('iteration [%d]....' % (it))
+			plpy.execute('TRUNCATE TABLE doc_word_topic_%d' % (it % 2))
+
+			sstime = time.time()
+			plpy.info('\t\tjoining tables...')
+			plpy.execute('TRUNCATE TABLE %s' % (self.pre_joined))
+			plpy.execute("""
+				INSERT INTO %s
+				SELECT dwz.docid, dwz.wordid, dwz.topics, dz.doc_topic, wz.word_topic, dz.corpus_topic
+				FROM
+				(
+					SELECT docid, doc_topic, sum(doc_topic) OVER() corpus_topic
+					FROM
+					(
+						SELECT docid, MADLIB_SCHEMA.newplda_sum_topic_count_agg(topics, %d) doc_topic
+						FROM doc_word_topic_%d 
+						GROUP BY docid
+					) t1
+				) dz,
+				(
+					SELECT wordid, MADLIB_SCHEMA.newplda_sum_topic_count_agg(topics, %d) word_topic
+					FROM doc_word_topic_%d 
+					GROUP BY wordid
+				) wz,
+				doc_word_topic_%d dwz
+				WHERE dwz.docid = dz.docid AND dwz.wordid = wz.wordid
+				""" % (self.pre_joined, self.num_topic, 1 - it % 2, self.num_topic, 1 - it % 2, 1 - it % 2))		
+			eetime = time.time()
+			plpy.info('\t\t\ttime elapsed: %.2f seconds' % (eetime - sstime))
+			
 			sstime = time.time()
 			plpy.info('\t\tsampling new topics...')
-			plpy.execute('TRUNCATE TABLE doc_word_topic_%d' % (it % 2))
-			plpy.execute("""INSERT INTO doc_word_topic_%d
-				SELECT (MADLIB_SCHEMA.__newplda_gibbs_wfunc(dwz.docid, dwz.wordid, dwz.topics, dz.topics, wz.topics, array[%s], %f, %f, %d, %d)).*
-				OVER (PARTITION BY dwz.gp_segment_id ORDER BY dwz.docid ROWS UNBOUNDED PRECEDING)
-				FROM doc_word_topic_%d AS dwz, %s AS dz, %s AS wz
-				WHERE dwz.docid = dz.docid and dwz.wordid = wz.wordid""" % \
-				(it % 2, str(self.count_z)[1:-1].replace('L', ''), self.alpha, \
-				self.beta, self.vocab_size, self.num_topic, 1 - it % 2, self.doc_topic, self.word_topic)) 
-			
+			plpy.execute("""
+				INSERT INTO doc_word_topic_%d
+				SELECT triple[1] docid, triple[2] wordid, triple[3:array_upper(triple, 1)] topics
+				FROM
+				(
+					SELECT 
+						MADLIB_SCHEMA.__newplda_gibbs_wfunc_fast(jd.docid, jd.wordid, 
+							jd.topics, jd.doc_topic, jd.word_topic, jd.corpus_topic, %f, %f, %d, %d)
+						OVER (PARTITION BY jd.gp_segment_id ORDER BY jd.docid ROWS UNBOUNDED PRECEDING) triple
+					FROM %s jd
+				) t1 
+				""" % (it % 2, self.alpha, self.beta, self.vocab_size, self.num_topic, self.pre_joined))
 			eetime = time.time()
 			plpy.info('\t\t\ttime elapsed: %.2f seconds' % (eetime - sstime))
 
-			self.comp_doc_topic(it)
-			self.comp_word_topic(it)
-			self.count_z = self.comp_count_topic(it)
-
 			etime = time.time()
 			plpy.info('\t\ttime elapsed: %.2f seconds' % (etime - stime))
+
+		def run_wfunc(self):
+			stime = time.time()
+			if(self.init == True):
+				self.init_random()
+			plpy.info('start training process...')
+			for it in range(1, self.num_iter + 1):
+				self.iteration_wfunc(it)
+
+			self.comp_doc_topic(self.num_iter)
+			self.comp_word_topic(self.num_iter)
+			etime = time.time()
+			plpy.info('finished, time elapsed: %.2f seconds' % (etime - stime))
 
 		def iteration(self, it):  
 			stime = time.time()
@@ -416,6 +503,6 @@ RETURNS text AS $$
 			plpy.info('finished, time elapsed: %.2f seconds' % (etime - stime))
 
 	plda = PLDA(dataset, num_topic, num_iter, alpha, beta, label, init)
-	plda.run()
+	plda.run_wfunc()
 	return 'succeeds';
 $$ LANGUAGE plpythonu;
