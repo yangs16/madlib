@@ -9,6 +9,8 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <math.h>
+#include <time.h>
+     
 
 #ifndef NO_PG_MODULE_MAGIC
 PG_MODULE_MAGIC;
@@ -30,7 +32,9 @@ PG_FUNCTION_INFO_V1(fFunc4GibbsWFuncFast);
 Datum fFunc4GibbsWFuncFast(PG_FUNCTION_ARGS);
 Datum fFunc4GibbsWFuncFast(PG_FUNCTION_ARGS)
 {
-
+	/*
+	clock_t start = clock();
+	*/
 	ArrayType * arr_state = PG_GETARG_ARRAYTYPE_P(0);
 	int32 * state = (int32 *)ARR_DATA_PTR(arr_state);
 
@@ -44,6 +48,10 @@ Datum fFunc4GibbsWFuncFast(PG_FUNCTION_ARGS)
 	res[1] = wordid;
 	memcpy(res + 2, state + 3, tcount * sizeof(int32));
 
+	/*
+	clock_t end = clock()
+	elog(WARNING, "ffunc: %d", end - start);
+	*/
 	PG_RETURN_ARRAYTYPE_P(arr_res);
 }
 
@@ -71,6 +79,9 @@ typedef struct {
 Datum sFunc4GibbsWFuncFast(PG_FUNCTION_ARGS);
 Datum sFunc4GibbsWFuncFast(PG_FUNCTION_ARGS)
 {
+	/*
+	clock_t start = clock();
+	*/
 	__gibbs_state_fast gsf;
 
 	int32 docid = PG_GETARG_INT32(1);
@@ -150,6 +161,9 @@ Datum sFunc4GibbsWFuncFast(PG_FUNCTION_ARGS)
 		}
 	}
 
+	/*
+	clock_t ss = clock();
+	*/
 	int32 * new_topics = (int32 *)palloc(tcount * sizeof(int32));
 	for(int32 i = 0; i < tcount; i++) {
 		int32 topic = topics[i];
@@ -166,7 +180,12 @@ Datum sFunc4GibbsWFuncFast(PG_FUNCTION_ARGS)
 
 	memcpy(gsf.topics, new_topics, tcount * sizeof(int32));
 	pfree(new_topics);
-
+	/*
+	clock_t ee = clock();
+	elog(WARNING, "\tsampling: %d", ee - ss);
+	clock_t end = clock();
+	elog(WARNING, "sfunc: %d", end - start);
+	*/
 	PG_RETURN_ARRAYTYPE_P(arr_return_state);
 }
 /************************************************************************ 

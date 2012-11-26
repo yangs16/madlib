@@ -39,7 +39,7 @@ AS 'MODULE_PATHNAME', 'fFunc4GibbsWFuncFast' LANGUAGE C STRICT;
 --docid int4, wordid int4, topics int4[], 
 --count_d_z int4[], count_w_z int4[], count_z int4[],
 --alpha float, beta float, vocab_size int4, num_topic int4
-DROP AGGREGATE IF EXISTS MADLIB_SCHEMA.newplda_gibbs_wfunc_fast(int4, int4, int4[], int4[], int4[], int4[], float, float, int4, int4);
+DROP AGGREGATE IF EXISTS MADLIB_SCHEMA.__newplda_gibbs_wfunc_fast(int4, int4, int4[], int4[], int4[], int4[], float, float, int4, int4);
 CREATE AGGREGATE MADLIB_SCHEMA.__newplda_gibbs_wfunc_fast(int4, int4, int4[], 
 			int4[], int4[], int4[],
 			float, float, int4, int4)
@@ -112,14 +112,21 @@ CREATE AGGREGATE MADLIB_SCHEMA.newplda_sum_topic_count_agg(int4[], int4)
         stype = int4[]
 );
 
-CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.newplda_log_likelihood(state float8, counts int4[], hyper float8)
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.__newplda_log_likelihood_sfunc(state float8, counts int4[], hyper float8)
 RETURNS float8 
 AS 'MODULE_PATHNAME', 'logLikelihood' LANGUAGE C STRICT;
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.__float_add(state1 float8, state2 float8)
+RETURNS float8 
+AS $$
+	return state1 + state2
+$$ LANGUAGE PLPYTHONU;
 
 DROP AGGREGATE IF EXISTS MADLIB_SCHEMA.newplda_log_likelihood_agg(int4[], float8);
 CREATE AGGREGATE MADLIB_SCHEMA.newplda_log_likelihood_agg(int4[], float8)
 (
-        sfunc = MADLIB_SCHEMA.newplda_log_likelihood,
+        sfunc = MADLIB_SCHEMA.__newplda_log_likelihood_sfunc,
+	m4_ifdef(`GREENPLUM', `prefunc = MADLIB_SCHEMA.__float_add,')
         stype = float8,
 	initcond = '0.0'
 );
@@ -272,7 +279,7 @@ RETURNS text AS $$
 $$ LANGUAGE plpythonu;
 
 CREATE OR REPLACE FUNCTION
-MADLIB_SCHEMA.newplda_train(dataset text, num_topic int4, num_iter int4, alpha float8, beta float8, label text, init boolean)
+MADLIB_SCHEMA.newplda_train(dataset text, num_topic int4, num_iter int4, alpha float8, beta float8, label text, init boolean, wfunc boolean)
 RETURNS text AS $$
 	import plpy
 	import random
@@ -421,7 +428,7 @@ RETURNS text AS $$
 				""" % (self.pre_joined, self.num_topic, 1 - it % 2, self.num_topic, 1 - it % 2, 1 - it % 2))		
 			eetime = time.time()
 			plpy.info('\t\t\ttime elapsed: %.2f seconds' % (eetime - sstime))
-			
+
 			sstime = time.time()
 			plpy.info('\t\tsampling new topics...')
 			plpy.execute("""
@@ -442,13 +449,99 @@ RETURNS text AS $$
 			etime = time.time()
 			plpy.info('\t\ttime elapsed: %.2f seconds' % (etime - stime))
 
+		def iteration_wfunc_v2(self, it):  
+			stime = time.time()
+
+			plpy.info('iteration [%d]....' % (it))
+			plpy.info('\t\tjoining & sampling tables...')
+			plpy.execute('TRUNCATE TABLE doc_word_topic_%d' % (it % 2))
+			plpy.execute("""
+				INSERT INTO doc_word_topic_%d
+				SELECT triple[1] docid, triple[2] wordid, triple[3:array_upper(triple, 1)] topics
+				FROM
+				(
+					SELECT 
+						MADLIB_SCHEMA.__newplda_gibbs_wfunc_fast(jd.docid, jd.wordid, 
+							jd.topics, jd.doc_topic, jd.word_topic, jd.corpus_topic::int4[], %f, %f, %d, %d)
+						OVER (PARTITION BY jd.gp_segment_id ORDER BY jd.docid ROWS UNBOUNDED PRECEDING) triple
+					FROM
+					(
+						SELECT dwz.gp_segment_id, dwz.docid, dwz.wordid, dwz.topics, dz.doc_topic, wz.word_topic, dz.corpus_topic
+						FROM
+						(
+							SELECT docid, doc_topic, sum(doc_topic) OVER() corpus_topic
+							FROM
+							(
+								SELECT docid, MADLIB_SCHEMA.newplda_sum_topic_count_agg(topics, %d) doc_topic
+								FROM doc_word_topic_%d 
+								GROUP BY docid
+							) t1
+						) dz,
+						(
+							SELECT wordid, MADLIB_SCHEMA.newplda_sum_topic_count_agg(topics, %d) word_topic
+							FROM doc_word_topic_%d 
+							GROUP BY wordid
+						) wz,
+						doc_word_topic_%d dwz
+						WHERE dwz.docid = dz.docid AND dwz.wordid = wz.wordid
+					) jd
+				) t1
+				""" % (it % 2, self.alpha, self.beta, self.vocab_size, self.num_topic, \
+					self.num_topic, 1 - it % 2, self.num_topic, 1 - it % 2, 1 - it % 2))
+
+			etime = time.time()
+			plpy.info('\t\ttime elapsed: %.2f seconds' % (etime - stime))
+
+		def iteration_wfunc_v3(self, it):  
+			stime = time.time()
+
+			plpy.info('iteration [%d]....' % (it))
+			plpy.info('\t\tjoining & sampling tables...')
+			plpy.execute('TRUNCATE TABLE doc_word_topic_%d' % (it % 2))
+			plpy.execute("""
+				INSERT INTO doc_word_topic_%d
+				SELECT triple[1] docid, triple[2] wordid, triple[3:array_upper(triple, 1)] topics
+				FROM
+				(
+					SELECT 
+						MADLIB_SCHEMA.__newplda_gibbs_wfunc_fast(jd.docid, jd.wordid, 
+							jd.topics, jd.doc_topic, jd.word_topic, jd.corpus_topic::int4[], %f, %f, %d, %d)
+						OVER (PARTITION BY jd.gp_segment_id ORDER BY jd.docid ROWS UNBOUNDED PRECEDING) triple
+					FROM
+					(
+						SELECT dwz.gp_segment_id, dwz.docid, dwz.wordid, dwz.topics, dz.doc_topic, wz.word_topic, z.corpus_topic
+						FROM
+						(
+							SELECT docid, MADLIB_SCHEMA.newplda_sum_topic_count_agg(topics, %d) doc_topic
+							FROM doc_word_topic_%d 
+							GROUP BY docid
+						) dz,
+						(
+							SELECT wordid, MADLIB_SCHEMA.newplda_sum_topic_count_agg(topics, %d) word_topic
+							FROM doc_word_topic_%d 
+							GROUP BY wordid
+						) wz,
+						(
+							SELECT MADLIB_SCHEMA.newplda_sum_topic_count_agg(topics, %d) corpus_topic
+							FROM doc_word_topic_%d 
+						) z,
+						doc_word_topic_%d dwz
+						WHERE dwz.docid = dz.docid AND dwz.wordid = wz.wordid
+					) jd
+				) t1
+				""" % (it % 2, self.alpha, self.beta, self.vocab_size, self.num_topic, \
+					self.num_topic, 1 - it % 2, self.num_topic, 1 - it % 2, self.num_topic, 1 - it % 2, 1 - it % 2))
+
+			etime = time.time()
+			plpy.info('\t\ttime elapsed: %.2f seconds' % (etime - stime))
+
 		def run_wfunc(self):
 			stime = time.time()
 			if(self.init == True):
 				self.init_random()
 			plpy.info('start training process...')
 			for it in range(1, self.num_iter + 1):
-				self.iteration_wfunc(it)
+				self.iteration_wfunc_v3(it)
 
 			self.comp_doc_topic(self.num_iter)
 			self.comp_word_topic(self.num_iter)
@@ -479,6 +572,44 @@ RETURNS text AS $$
 
 			etime = time.time()
 			plpy.info('\t\ttime elapsed: %.2f seconds' % (etime - stime))
+
+		def iteration_v2(self, it):  
+			stime = time.time()
+
+			plpy.info('iteration [%d]....' % (it))
+			plpy.info('\t\tjoining & sampling tables...')
+			plpy.execute('TRUNCATE TABLE doc_word_topic_%d' % (it % 2))
+			plpy.execute("""
+				INSERT INTO doc_word_topic_%d
+				SELECT 
+					docid, wordid, MADLIB_SCHEMA.__newplda_gibbs_sample(
+						jd.topics, jd.doc_topic, jd.word_topic, jd.corpus_topic::int4[], %f, %f)
+				FROM
+				(
+					SELECT dwz.gp_segment_id, dwz.docid, dwz.wordid, dwz.topics, dz.doc_topic, wz.word_topic, z.corpus_topic
+					FROM
+					(
+						SELECT docid, MADLIB_SCHEMA.newplda_sum_topic_count_agg(topics, %d) doc_topic
+						FROM doc_word_topic_%d 
+						GROUP BY docid
+					) dz,
+					(
+						SELECT wordid, MADLIB_SCHEMA.newplda_sum_topic_count_agg(topics, %d) word_topic
+						FROM doc_word_topic_%d 
+						GROUP BY wordid
+					) wz,
+					(
+						SELECT MADLIB_SCHEMA.newplda_sum_topic_count_agg(topics, %d) corpus_topic
+						FROM doc_word_topic_%d 
+					) z,
+					doc_word_topic_%d dwz
+					WHERE dwz.docid = dz.docid AND dwz.wordid = wz.wordid
+				) jd
+				""" % (it % 2, self.alpha, self.beta, self.num_topic, 1 - it % 2, self.num_topic, 1 - it % 2, self.num_topic, 1 - it % 2, 1 - it % 2))
+
+			etime = time.time()
+			plpy.info('\t\ttime elapsed: %.2f seconds' % (etime - stime))
+
 		
 		def run(self):
 			stime = time.time()
@@ -493,7 +624,7 @@ RETURNS text AS $$
 
 			plpy.info('start training process...')
 			for it in range(1, self.num_iter + 1):
-				self.iteration_wfunc(it)
+				self.iteration(it)
 				cur_ll = self.comp_ll()
 				diff_ll = cur_ll - old_ll
 				old_ll = cur_ll
@@ -502,7 +633,25 @@ RETURNS text AS $$
 			etime = time.time()
 			plpy.info('finished, time elapsed: %.2f seconds' % (etime - stime))
 
+		def run_v2(self):
+			stime = time.time()
+			if(self.init == True):
+				self.init_random()
+
+			plpy.info('start training process...')
+			for it in range(1, self.num_iter + 1):
+				self.iteration_v2(it)
+
+			self.comp_doc_topic(self.num_iter)
+			self.comp_word_topic(self.num_iter)
+			
+			etime = time.time()
+			plpy.info('finished, time elapsed: %.2f seconds' % (etime - stime))
+
 	plda = PLDA(dataset, num_topic, num_iter, alpha, beta, label, init)
-	plda.run_wfunc()
+	if wfunc:
+		plda.run_wfunc()
+	else:
+		plda.run_v2()
 	return 'succeeds';
 $$ LANGUAGE plpythonu;
