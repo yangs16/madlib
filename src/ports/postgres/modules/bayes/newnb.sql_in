@@ -1,0 +1,184 @@
+m4_include(`SQLCommon.m4')
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.newnb_train(dataset text, label text)
+RETURNS VOID AS $$
+	import time
+	global dataset
+	global label
+
+	def get_prior_query():
+		"""it might be not necessary for smoothing here"""
+		return 	"""
+			INSERT INTO nb_class_prior_%s 
+			SELECT class, sample_count, (sample_count + 1)::float8/(total + class_count) prob
+			FROM
+			(
+				SELECT class, sample_count, SUM(sample_count) OVER () total, COUNT(class) OVER () class_count
+				FROM
+				(	
+					SELECT class, COUNT(*) sample_count 
+					FROM %s 
+					GROUP BY class
+				) t1
+			) t2
+		"""
+
+	def comp_class_prior():	
+		plpy.execute('DROP TABLE if exists nb_class_prior_%s' % (label))
+		plpy.execute('CREATE TABLE nb_class_prior_%s (class int4, count int4, prior float8)' % (label) \
+			+ m4_ifdef(`__GREENPLUM__',`" DISTRIBUTED BY (class)"'))
+		sql_str = get_prior_query()
+		plpy.execute(sql_str % (label, dataset))
+
+	def get_feature_prob_query():
+		"""some operations cannot fully utilize the node resources because of data redistributions"""
+		return 	"""
+			INSERT INTO nb_feature_prob_%s 
+			SELECT sf.class, sf.fid, sf.fval, 
+				CASE 
+					when fc.sample_cnt is null then ln(1.0::float8/(sf.total_cnt + sf.fval_cnt))
+					else ln((fc.sample_cnt + 1.0)::float8/(sf.total_cnt + sf.fval_cnt)) 
+				end lnprob
+			FROM
+			(
+				SELECT
+					generate_series(1, array_upper(attributes, 1)) fid, unnest(attributes) fval, COUNT(*) sample_cnt, class
+				FROM %s
+				GROUP BY fid, fval, class 
+			) fc
+			right join
+			(
+				SELECT cp.class, cp.count total_cnt, nvc.fid, nvc.fval, nvc.fval_cnt
+				FROM
+				(
+					SELECT fid, fval, COUNT(fval) OVER (partition by fid) fval_cnt
+					FROM
+					(
+						SELECT 
+							generate_series(1, array_upper(attributes, 1)) fid, unnest(attributes) fval 
+						FROM %s
+						GROUP BY fid, fval
+					) nv
+				) nvc,
+				nb_class_prior_%s cp
+			) sf
+			on (fc.class = sf.class AND fc.fid = sf.fid AND fc.fval = sf.fval)
+		"""	
+
+	def comp_feature_prob():
+		plpy.execute('DROP TABLE if exists nb_feature_prob_%s' % (label))
+		plpy.execute('CREATE TABLE nb_feature_prob_%s (class int4, fid int4, fval int4, lnprob float8)' % (label) \
+			+ m4_ifdef(`__GREENPLUM__',`" DISTRIBUTED BY (class)"'))
+		sql_str = get_feature_prob_query()
+		plpy.execute(sql_str % (label, dataset, dataset, label))
+
+	comp_class_prior()
+	comp_feature_prob()
+$$ LANGUAGE plpythonu;
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.newnb_pred(dataset text, label text)
+RETURNS VOID AS $$
+	global dataset
+	global label
+
+	def get_pred_query():
+		return """
+			INSERT INTO nb_pred_%s
+			SELECT id, class
+			FROM
+			(
+				SELECT id, class, lnprob, max(lnprob) OVER (partition by id) as maxprob
+				FROM
+				(
+					SELECT pp.id id, pp.class class, (pp.lnprob+ln(cp.prior)) lnprob
+					FROM
+					(
+						SELECT f.id id, m.class class, SUM(m.lnprob) lnprob 
+						FROM 
+						(
+							SELECT id, generate_series(1, array_upper(attributes, 1)) fid, unnest(attributes) fval FROM %s
+						) f, 
+						nb_feature_prob_%s m 
+						WHERE f.fid = m.fid AND f.fval = m.fval
+						GROUP BY id, class
+					) pp,
+					nb_class_prior_%s cp
+					WHERE pp.class = cp.class
+				) t1
+			) t2
+			WHERE lnprob = maxprob
+		"""
+
+	def pred():
+		plpy.execute('DROP TABLE if exists nb_pred_%s' % (label))
+		plpy.execute('CREATE TABLE nb_pred_%s(id int4, class int4)' % (label) \
+			+ m4_ifdef(`__GREENPLUM__',`" DISTRIBUTED BY (id)"'))
+		sql_str = get_pred_query()
+		plpy.execute(sql_str % (label, dataset, label, label))
+
+	pred()
+$$ LANGUAGE plpythonu;
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.newnb_pred_prob(dataset text, label text)
+RETURNS VOID AS $$
+	global dataset
+	global label
+
+	def get_pred_query_prob():
+		return """
+			INSERT INTO nb_pred_prob_%s
+			SELECT id, class, exp(lnprob - maxprob)::float8/SUM(exp(lnprob - maxprob)) OVER (partition by id) as prob
+			FROM
+			(
+				SELECT id, class, lnprob, max(lnprob) OVER (partition by id) as maxprob
+				FROM
+				(
+					SELECT pp.id id, pp.class class, (pp.lnprob+ln(cp.prior)) lnprob
+					FROM
+					(
+						SELECT f.id id, m.class class, SUM(m.lnprob) lnprob 
+						FROM 
+						(
+							SELECT id, generate_series(1, array_upper(attributes, 1)) fid, unnest(attributes) fval FROM %s
+						) f, 
+						nb_feature_prob_%s m 
+						WHERE f.fid = m.fid AND f.fval = m.fval
+						GROUP BY id, class
+					) pp,
+					nb_class_prior_%s cp
+					WHERE pp.class = cp.class
+				) t1
+			) t2
+		"""
+
+	def pred():
+		plpy.execute('DROP TABLE if exists nb_pred_prob_%s' % (label))
+		plpy.execute('DROP TABLE if exists nb_pred_prob_%s' % (label))
+		plpy.execute('CREATE TABLE nb_pred_prob_%s(id int4, class int4, prob float8)' % (label) \
+			+ m4_ifdef(`__GREENPLUM__',`" DISTRIBUTED BY (id)"'))
+
+		sql_str = get_pred_query_prob()
+		plpy.execute(sql_str % (label, dataset, label, label))
+
+	pred()
+$$ LANGUAGE plpythonu;
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.newnb_eval(pred text, truth text)
+RETURNS FLOAT8 AS $$
+	import time
+	global pred
+	global truth
+
+	def comp_accuracy():
+		label = int(time.time())
+		plpy.execute('DROP TABLE if exists nb_eval_%s' % (label))
+		plpy.execute('CREATE TEMP TABLE nb_eval_%s(id int4, pred int4, truth int4)' % (label) \
+			+ m4_ifdef(`__GREENPLUM__',`" DISTRIBUTED BY (id)"'))
+		plpy.execute('INSERT INTO nb_eval_%s' % (label) + ' SELECT p.id, p.class, t.class FROM %s p, %s t WHERE p.id = t.id' % (pred, truth))
+		total = plpy.execute('SELECT COUNT(*) total FROM nb_eval_%s' % (label))[0]['total']
+		corr = plpy.execute('SELECT COUNT(*) corr FROM nb_eval_%s WHERE pred = truth' % (label))[0]['corr']
+		plpy.execute('DROP TABLE if exists nb_eval_%s' % (label))
+		return float(corr)/total
+
+	return comp_accuracy()
+$$ LANGUAGE plpythonu;
