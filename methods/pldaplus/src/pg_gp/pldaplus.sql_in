@@ -147,10 +147,10 @@ RETURNS text AS $$
 				SELECT generate_series(0, %d) wordid, MADLIB_SCHEMA.__pldaplus_unnest_by_size(counts, %d) word_topic
 				FROM
 				( 
-					SELECT MADLIB_SCHEMA.__pldaplus_count_topic_agg(words, counts, topics[%d:array_upper(topics,1)], %d, %d) counts
+					SELECT MADLIB_SCHEMA.__pldaplus_count_topic_agg(words, counts, topics, %d, %d) counts
 					FROM doc_content_topic_%d 
 				) t1
-				""" % (self.word_topic, self.voc_size - 1, self.topic_num, self.topic_num + 1, self.voc_size, self.topic_num, it % 2))
+				""" % (self.word_topic, self.voc_size - 1, self.topic_num, self.voc_size, self.topic_num, it % 2))
 			etime = time.time()
 			plpy.info('\t\t\ttime elapsed: %.2f seconds' % (etime - stime))
 
@@ -180,7 +180,7 @@ RETURNS text AS $$
 							FROM
 							(
 								SELECT
-								MADLIB_SCHEMA.__pldaplus_count_topic_agg(words, counts, topics[%d:array_upper(topics, 1)], %d, %d) word_topic
+								MADLIB_SCHEMA.__pldaplus_count_topic_agg(words, counts, topics, %d, %d) word_topic
 								FROM doc_content_topic_%d 
 							) wz
 						) wzcz,
@@ -194,7 +194,7 @@ RETURNS text AS $$
 					ON (chunk.docid = dcz.docid)
 				) jd
 				""" % (it % 2, self.alpha, self.beta, self.voc_size, self.topic_num, \
-					self.topic_num, self.topic_num + 1, self.voc_size, self.topic_num, 1 - it % 2, 1 - it % 2, 1 - it % 2))
+					self.topic_num, self.voc_size, self.topic_num, 1 - it % 2, 1 - it % 2, 1 - it % 2))
 
 			etime = time.time()
 			plpy.info('\t\ttime elapsed: %.2f seconds' % (etime - stime))

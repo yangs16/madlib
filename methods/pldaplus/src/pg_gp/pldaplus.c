@@ -275,7 +275,7 @@ Datum pldaPlusCountTopic(PG_FUNCTION_ARGS)
 	int32 * counts = (int32 *)ARR_DATA_PTR(arr_counts);
 	int32 * topics = (int32 *)ARR_DATA_PTR(arr_topics);
 
-	int32 word_index = 0;
+	int32 word_index = topic_num;
 	for(int32 i = 0; i < unique_word_count; i++){
 		int32 wordid = words[i];
 		for(int32 j = 0; j < counts[i]; j++){
