@@ -325,15 +325,10 @@ RETURNS text AS $$
 
 			plpy.info('counting size of vocabulary...')
 			stime = time.time()
-			wcount_t = plpy.execute("""
-				SELECT count(*) wcount
-				FROM
-				(
-					SELECT wordid FROM %s GROUP BY wordid
-				) t1""" % (self.dataset))
-        		if (wcount_t.nrows() <> 1):
-				plpy.error("error: wcount_t is not of the expected form")
-			self.vocab_size = wcount_t[0]['wcount']
+			voc_size_t = plpy.execute('SELECT max(wordid) + 1 voc_size FROM %s' % (self.dataset))
+        		if (voc_size_t.nrows() <> 1):
+				plpy.error("error: voc_size_t is not of the expected form")
+			self.vocab_size = voc_size_t[0]['voc_size']
 			etime = time.time()
 			plpy.info('\t\t\ttime elapsed: %.2f seconds' % (etime - stime))
 
@@ -542,7 +537,6 @@ RETURNS text AS $$
 			plpy.info('start training process...')
 			for it in range(1, self.num_iter + 1):
 				self.iteration_wfunc_v3(it)
-
 			self.comp_doc_topic(self.num_iter)
 			self.comp_word_topic(self.num_iter)
 			etime = time.time()

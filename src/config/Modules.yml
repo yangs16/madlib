@@ -22,6 +22,7 @@ modules:
     - name: linalg
     - name: plda
     - name: newplda
+    - name: pldaplus
     - name: prob
     - name: quantile
     - name: regress
