@@ -18,14 +18,14 @@ PG_FUNCTION_INFO_V1(pldaPlusRandomAssign);
 PG_FUNCTION_INFO_V1(pldaPlusCountTopic);
 PG_FUNCTION_INFO_V1(pldaPlusInt32ArrayAdd);
 PG_FUNCTION_INFO_V1(pldaPlusArrayFoldAdd);
+PG_FUNCTION_INFO_V1(pldaPlusGibbsSFunc);
+PG_FUNCTION_INFO_V1(pldaPlusGibbsFFunc);
+PG_FUNCTION_INFO_V1(pldaPlusGibbsPred);
 
 /************************************************************************ 
  * Begin: Experiment with window function to transfer states between rows 
  * Using encoded int32 array should be more efficient 
 *************************************************************************/ 
-PG_FUNCTION_INFO_V1(pldaPlusGibbsSFunc);
-PG_FUNCTION_INFO_V1(pldaPlusGibbsFFunc);
-
 Datum pldaPlusGibbsFFunc(PG_FUNCTION_ARGS);
 Datum pldaPlusGibbsFFunc(PG_FUNCTION_ARGS)
 {
@@ -168,6 +168,55 @@ Datum pldaPlusGibbsSFunc(PG_FUNCTION_ARGS)
 /************************************************************************ 
  * End
  ************************************************************************/ 
+
+/**
+ * word_count int4, words int4[], counts int4[], doc_topic_topics int4[],
+ * word_topic int4[], corpus_topic int4[], 
+ * alpha float, beta float,
+ * topic_num int4, iter_num int4)
+**/
+Datum pldaPlusGibbsPred(PG_FUNCTION_ARGS);
+Datum pldaPlusGibbsPred(PG_FUNCTION_ARGS)
+{
+	int32 word_count = PG_GETARG_INT32(0);
+	ArrayType * arr_words = PG_GETARG_ARRAYTYPE_P(1);
+	ArrayType * arr_counts = PG_GETARG_ARRAYTYPE_P(2);
+	ArrayType * arr_doc_topic_topics = PG_GETARG_ARRAYTYPE_P(3);
+	ArrayType * arr_word_topic = PG_GETARG_ARRAYTYPE_P(4);
+	ArrayType * arr_corpus_topic = PG_GETARG_ARRAYTYPE_P(5);
+	float8 alpha = PG_GETARG_FLOAT8(6);
+	float8 beta = PG_GETARG_FLOAT8(7);
+	int32 topic_num = PG_GETARG_INT32(8);
+	int32 iter_num = PG_GETARG_INT32(9);
+
+ 	int32 * words = (int32 *)ARR_DATA_PTR(arr_words);
+ 	int32 * counts = (int32 *)ARR_DATA_PTR(arr_counts);
+ 	int32 * doc_topic_topics = (int32 *)ARR_DATA_PTR(arr_doc_topic_topics);
+	int32 * word_topic = (int32 *)ARR_DATA_PTR(arr_word_topic);
+ 	int32 *	corpus_topic = (int32 *)ARR_DATA_PTR(arr_corpus_topic);
+
+	ArrayType * arr_result = construct_array(NULL, topic_num + word_count, INT4OID, 4, true, 'i');
+	int32 * result = (int32 *) ARR_DATA_PTR(arr_result);
+	memcpy(result, doc_topic_topics, (topic_num + word_count) * sizeof(int32));
+
+	for(int it = 0; it < iter_num; it++){
+		int32 unique_word_count = ARR_DIMS(arr_words)[0];
+		int32 word_index = topic_num;
+		for(int32 i = 0; i < unique_word_count; i++) {
+			int32 wordid = words[i];
+			for(int32 j = 0; j < counts[i]; j++){
+				int32 topic = result[word_index];
+				int32 retopic = __pldaPlusSampleTopic(topic_num, topic, result, word_topic + wordid * topic_num, corpus_topic, alpha, beta);
+				result[word_index] = retopic;
+				result[topic]--;
+				result[retopic]++;
+				word_index++;
+			}
+		}
+	}
+
+	PG_RETURN_ARRAYTYPE_P(arr_result);
+}
 
 Datum pldaPlusRandomAssign(PG_FUNCTION_ARGS);
 Datum pldaPlusRandomAssign(PG_FUNCTION_ARGS)
