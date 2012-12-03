@@ -63,6 +63,26 @@ CREATE OR REPLACE FUNCTION
 RETURNS int4[] 
 AS 'MODULE_PATHNAME', 'pldaPlusGibbsFast' LANGUAGE C;
 
+CREATE OR REPLACE FUNCTION
+	MADLIB_SCHEMA.__pldaplus_first_sfunc(state int4, val int4)
+RETURNS int4
+AS $$
+	global state
+	if state < 0:
+		state = val
+	return state
+$$ LANGUAGE PLPYTHONU;
+
+DROP AGGREGATE IF EXISTS
+	MADLIB_SCHEMA.__pldaplus_first(int4);
+CREATE AGGREGATE 
+	MADLIB_SCHEMA.__pldaplus_first(int4)
+(
+        sfunc = MADLIB_SCHEMA.__pldaplus_first_sfunc,
+        stype = int4,
+	initcond = '-1'
+);
+
 CREATE OR REPLACE FUNCTION 
 	MADLIB_SCHEMA.__pldaplus_unnest_by_size(arr int4[], size int4)
 RETURNS SETOF int4[] 
@@ -227,7 +247,7 @@ RETURNS text AS $$
 							) wz
 						) wzcz,
 						(
-							SELECT min(docid) docid FROM %s_%d GROUP BY gp_segment_id
+							SELECT MADLIB_SCHEMA.min(docid) docid FROM %s_%d GROUP BY gp_segment_id
 						) trick
 
 					) chunk 
@@ -272,7 +292,7 @@ RETURNS text AS $$
 							) wz
 						) wzcz,
 						(
-							SELECT min(docid) docid FROM %s_%d GROUP BY gp_segment_id
+							SELECT MADLIB_SCHEMA.__pldaplus_first(docid) docid FROM %s_%d GROUP BY gp_segment_id
 						) trick
 					) chunk 
 					RIGHT JOIN
