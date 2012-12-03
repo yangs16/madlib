@@ -55,6 +55,14 @@ CREATE OR REPLACE FUNCTION
 RETURNS int4[] 
 AS 'MODULE_PATHNAME', 'pldaPlusGibbsPred' LANGUAGE C STRICT;
 
+CREATE OR REPLACE FUNCTION
+	MADLIB_SCHEMA.__pldaplus_gibbs_fast(
+		word_count int4, words int4[], counts int4[], 
+		doc_topic_topics int4[], word_topic int4[], corpus_topic int4[], 
+		alpha float, beta float, topic_num int4, iter_num int4)
+RETURNS int4[] 
+AS 'MODULE_PATHNAME', 'pldaPlusGibbsFast' LANGUAGE C;
+
 CREATE OR REPLACE FUNCTION 
 	MADLIB_SCHEMA.__pldaplus_unnest_by_size(arr int4[], size int4)
 RETURNS SETOF int4[] 
@@ -90,7 +98,7 @@ CREATE AGGREGATE
 );
 
 CREATE OR REPLACE FUNCTION
-MADLIB_SCHEMA.pldaplus_train(dataset text, voc_size int4, topic_num int4, iter_num int4, alpha float8, beta float8, label text)
+MADLIB_SCHEMA.pldaplus_train(dataset text, voc_size int4, topic_num int4, iter_num int4, alpha float8, beta float8, label text, runfast boolean)
 RETURNS text AS $$
 	import plpy
 	import time
@@ -234,6 +242,50 @@ RETURNS text AS $$
 			etime = time.time()
 			plpy.info('\t\ttime elapsed: %.2f seconds' % (etime - stime))
 
+		def iteration_fast(self, it):  
+			stime = time.time()
+
+			plpy.info('iteration [%d]....' % (it))
+			plpy.info('\t\tjoining & sampling tables...')
+			plpy.execute('TRUNCATE TABLE %s_%d' % (self.doc_content_topic, it % 2))
+			plpy.info("""
+				INSERT INTO %s_%d
+				SELECT	docid, wordcount, words, counts,  
+					MADLIB_SCHEMA.__pldaplus_gibbs_fast(
+						wordcount, words, counts, topics, 
+						word_topic, corpus_topic, 
+						%f, %f, %d, %d)
+				FROM
+				(
+					SELECT dcz.gp_segment_id, dcz.docid, dcz.wordcount, dcz.words, dcz.counts, dcz.topics, chunk.word_topic, chunk.corpus_topic
+					FROM
+					(
+						SELECT trick.docid, wzcz.word_topic, wzcz.corpus_topic
+						FROM
+						(
+							SELECT word_topic, MADLIB_SCHEMA.__pldaplus_array_fold_add(word_topic, %d) corpus_topic
+							FROM
+							(
+								SELECT
+								MADLIB_SCHEMA.__pldaplus_count_topic_agg(words, counts, topics, %d, %d) word_topic
+								FROM %s_%d 
+							) wz
+						) wzcz,
+						(
+							SELECT min(docid) docid FROM %s_%d GROUP BY gp_segment_id
+						) trick
+					) chunk 
+					RIGHT JOIN
+					%s_%d dcz
+					ON (chunk.docid = dcz.docid)
+				) jd
+				""" % (self.doc_content_topic, it % 2, self.alpha, self.beta, self.voc_size, self.topic_num, \
+					self.topic_num, self.voc_size, self.topic_num, self.doc_content_topic, 1 - it % 2, \
+					self.doc_content_topic, 1 - it % 2, self.doc_content_topic, 1 - it % 2))
+
+			etime = time.time()
+			plpy.info('\t\ttime elapsed: %.2f seconds' % (etime - stime))
+
 		def run(self):
 			stime = time.time()
 			plpy.info('start training process...')
@@ -248,8 +300,25 @@ RETURNS text AS $$
 			etime = time.time()
 			plpy.info('finished, time elapsed: %.2f seconds' % (etime - stime))
 
+		def run_fast(self):
+			stime = time.time()
+			plpy.info('start training process...')
+
+			self.init_random()
+			for it in range(1, self.iter_num + 1):
+				self.iteration_fast(it)
+			self.gen_model()
+			self.comp_doc_topic(self.iter_num)
+			self.comp_word_topic(self.iter_num)
+
+			etime = time.time()
+			plpy.info('finished, time elapsed: %.2f seconds' % (etime - stime))
+
 	plda = PLDA(dataset, voc_size, topic_num, iter_num, alpha, beta, label)
-	plda.run()
+	if True == runfast:
+		plda.run_fast()
+	else:
+		plda.run()
 	return 'succeeds';
 $$ LANGUAGE plpythonu;
 

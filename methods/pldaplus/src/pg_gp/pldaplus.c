@@ -21,6 +21,7 @@ PG_FUNCTION_INFO_V1(pldaPlusArrayFoldAdd);
 PG_FUNCTION_INFO_V1(pldaPlusGibbsSFunc);
 PG_FUNCTION_INFO_V1(pldaPlusGibbsFFunc);
 PG_FUNCTION_INFO_V1(pldaPlusGibbsPred);
+PG_FUNCTION_INFO_V1(pldaPlusGibbsFast);
 
 /************************************************************************ 
  * Begin: Experiment with window function to transfer states between rows 
@@ -212,6 +213,87 @@ Datum pldaPlusGibbsPred(PG_FUNCTION_ARGS)
 				result[retopic]++;
 				word_index++;
 			}
+		}
+	}
+
+	PG_RETURN_ARRAYTYPE_P(arr_result);
+}
+
+
+/**
+ * word_count int4, words int4[], counts int4[], doc_topic_topics int4[],
+ * word_topic int4[], corpus_topic int4[], 
+ * alpha float, beta float,
+ * topic_num int4, iter_num int4)
+**/
+Datum pldaPlusGibbsFast(PG_FUNCTION_ARGS);
+Datum pldaPlusGibbsFast(PG_FUNCTION_ARGS)
+{
+	int32 word_count = PG_GETARG_INT32(0);
+	ArrayType * arr_words = PG_GETARG_ARRAYTYPE_P(1);
+	ArrayType * arr_counts = PG_GETARG_ARRAYTYPE_P(2);
+	ArrayType * arr_doc_topic_topics = PG_GETARG_ARRAYTYPE_P(3);
+ 	int32 * words = (int32 *)ARR_DATA_PTR(arr_words);
+ 	int32 * counts = (int32 *)ARR_DATA_PTR(arr_counts);
+ 	int32 * doc_topic_topics = (int32 *)ARR_DATA_PTR(arr_doc_topic_topics);
+
+	ArrayType * arr_word_topic = 0;
+	int32 * word_topic;
+	if(!PG_ARGISNULL(4)){
+		arr_word_topic = PG_GETARG_ARRAYTYPE_P(4);
+		word_topic = (int32 *)ARR_DATA_PTR(arr_word_topic);
+	}
+
+	ArrayType * arr_corpus_topic = 0;
+ 	int32 *	corpus_topic;
+	if(!PG_ARGISNULL(5)){
+		arr_corpus_topic = PG_GETARG_ARRAYTYPE_P(5);
+ 		corpus_topic = (int32 *)ARR_DATA_PTR(arr_corpus_topic);
+	}
+
+	float8 alpha = PG_GETARG_FLOAT8(6);
+	float8 beta = PG_GETARG_FLOAT8(7);
+	int32 voc_size = PG_GETARG_INT32(8);
+	int32 topic_num = PG_GETARG_INT32(9);
+
+	int32 __state_size = (voc_size + 1) * topic_num;
+	if (!fcinfo->flinfo->fn_extra)
+	{
+		fcinfo->flinfo->fn_extra =
+			MemoryContextAllocZero(
+					fcinfo->flinfo->fn_mcxt,
+					__state_size * sizeof(int32));
+		int32 * state = (int32 *) fcinfo->flinfo->fn_extra;
+		if(NULL == word_topic || NULL == corpus_topic){
+			elog(ERROR, "The parameters word_topic and corpus_topic should not be null for the first call of pldaPlusGibbsFast");
+		}
+		memcpy(state, word_topic, (voc_size * topic_num) * sizeof(int32));
+		memcpy(state + voc_size * topic_num, corpus_topic, topic_num * sizeof(int32));
+	}
+	int32 * state = (int32 *) fcinfo->flinfo->fn_extra;
+	if(NULL == state){
+		elog(ERROR, "fcinfo->flinfo->fn_extra should not be null");
+	}
+
+	ArrayType * arr_result = construct_array(NULL, topic_num + word_count, INT4OID, 4, true, 'i');
+	int32 * result = (int32 *) ARR_DATA_PTR(arr_result);
+	memcpy(result, doc_topic_topics, (topic_num + word_count) * sizeof(int32));
+
+	int32 unique_word_count = ARR_DIMS(arr_words)[0];
+	int32 word_index = topic_num;
+	for(int32 i = 0; i < unique_word_count; i++) {
+		int32 wordid = words[i];
+		for(int32 j = 0; j < counts[i]; j++){
+			int32 topic = result[word_index];
+			int32 retopic = __pldaPlusSampleTopic(topic_num, topic, result, state + wordid * topic_num, state + voc_size * topic_num, alpha, beta);
+			result[word_index] = retopic;
+			result[topic]--;
+			result[retopic]++;
+			state[voc_size * topic_num + topic]--;
+			state[voc_size * topic_num + retopic]++;
+			state[wordid * topic_num + topic]--;
+			state[wordid * topic_num + retopic]++;
+			word_index++;
 		}
 	}
 
