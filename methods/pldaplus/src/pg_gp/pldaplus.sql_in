@@ -248,7 +248,7 @@ RETURNS text AS $$
 			plpy.info('iteration [%d]....' % (it))
 			plpy.info('\t\tjoining & sampling tables...')
 			plpy.execute('TRUNCATE TABLE %s_%d' % (self.doc_content_topic, it % 2))
-			plpy.info("""
+			plpy.execute("""
 				INSERT INTO %s_%d
 				SELECT	docid, wordcount, words, counts,  
 					MADLIB_SCHEMA.__pldaplus_gibbs_fast(
