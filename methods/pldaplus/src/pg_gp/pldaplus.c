@@ -78,14 +78,14 @@ Datum pldaPlusGibbsSFunc(PG_FUNCTION_ARGS)
  	int32 * doc_topic_topics = (int32 *)ARR_DATA_PTR(arr_doc_topic_topics);
 
 	ArrayType * arr_word_topic;
-	int32 * word_topic;
+	int32 * word_topic = 0;
 	if(!PG_ARGISNULL(5)){
 		arr_word_topic = PG_GETARG_ARRAYTYPE_P(5);
 	 	word_topic = (int32 *)ARR_DATA_PTR(arr_word_topic);
 	}
 
 	ArrayType * arr_corpus_topic;
- 	int32 * corpus_topic;
+ 	int32 * corpus_topic = 0;
 	if(!PG_ARGISNULL(6)){
 		arr_corpus_topic = PG_GETARG_ARRAYTYPE_P(6);
  		corpus_topic = (int32 *)ARR_DATA_PTR(arr_corpus_topic);
@@ -239,14 +239,14 @@ Datum pldaPlusGibbsPredFast(PG_FUNCTION_ARGS)
  	int32 * counts = (int32 *)ARR_DATA_PTR(arr_counts);
  	int32 * doc_topic_topics = (int32 *)ARR_DATA_PTR(arr_doc_topic_topics);
 
-	ArrayType * arr_word_topic = 0;
+	ArrayType * arr_word_topic;
 	int32 * word_topic = 0;
 	if(!PG_ARGISNULL(4)){
 		arr_word_topic = PG_GETARG_ARRAYTYPE_P(4);
 		word_topic = (int32 *)ARR_DATA_PTR(arr_word_topic);
 	}
 
-	ArrayType * arr_corpus_topic = 0;
+	ArrayType * arr_corpus_topic;
 	int32 * corpus_topic = 0;
 	if(!PG_ARGISNULL(5)){
 		arr_corpus_topic = PG_GETARG_ARRAYTYPE_P(5);
@@ -320,15 +320,15 @@ Datum pldaPlusGibbsFast(PG_FUNCTION_ARGS)
  	int32 * counts = (int32 *)ARR_DATA_PTR(arr_counts);
  	int32 * doc_topic_topics = (int32 *)ARR_DATA_PTR(arr_doc_topic_topics);
 
-	ArrayType * arr_word_topic = 0;
-	int32 * word_topic;
+	ArrayType * arr_word_topic;
+	int32 * word_topic = 0;
 	if(!PG_ARGISNULL(4)){
 		arr_word_topic = PG_GETARG_ARRAYTYPE_P(4);
 		word_topic = (int32 *)ARR_DATA_PTR(arr_word_topic);
 	}
 
-	ArrayType * arr_corpus_topic = 0;
- 	int32 *	corpus_topic;
+	ArrayType * arr_corpus_topic;
+ 	int32 *	corpus_topic = 0;
 	if(!PG_ARGISNULL(5)){
 		arr_corpus_topic = PG_GETARG_ARRAYTYPE_P(5);
  		corpus_topic = (int32 *)ARR_DATA_PTR(arr_corpus_topic);
