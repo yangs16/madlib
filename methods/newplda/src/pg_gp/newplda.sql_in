@@ -108,7 +108,7 @@ DROP AGGREGATE IF EXISTS MADLIB_SCHEMA.newplda_sum_topic_count_agg(int4[], int4)
 CREATE AGGREGATE MADLIB_SCHEMA.newplda_sum_topic_count_agg(int4[], int4)
 (
         sfunc = MADLIB_SCHEMA.__newplda_sum_topic_count_sfunc,
-	m4_ifdef(`GREENPLUM', `prefunc = MADLIB_SCHEMA.__newplda_sum_topic_count_prefunc,')
+	m4_ifdef(`__GREENPLUM__', `prefunc = MADLIB_SCHEMA.__newplda_sum_topic_count_prefunc,')
         stype = int4[]
 );
 
@@ -126,7 +126,7 @@ DROP AGGREGATE IF EXISTS MADLIB_SCHEMA.newplda_log_likelihood_agg(int4[], float8
 CREATE AGGREGATE MADLIB_SCHEMA.newplda_log_likelihood_agg(int4[], float8)
 (
         sfunc = MADLIB_SCHEMA.__newplda_log_likelihood_sfunc,
-	m4_ifdef(`GREENPLUM', `prefunc = MADLIB_SCHEMA.__float_add,')
+	m4_ifdef(`__GREENPLUM__', `prefunc = MADLIB_SCHEMA.__float_add,')
         stype = float8,
 	initcond = '0.0'
 );
@@ -148,7 +148,7 @@ CREATE FUNCTION MADLIB_SCHEMA.newplda_get_topic_desc_all(num_topic int4, label t
 RETURNS text AS $$
 	plpy.execute('DROP TABLE IF EXISTS topic_desc_%s' % (label))
 	plpy.execute('CREATE TABLE topic_desc_%s(topicid int4, word text, prob float8)' % (label) \
-		+ m4_ifdef(`GREENPLUM', `" WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (topicid)"'))
+		m4_ifdef(`__GREENPLUM__', `+ " WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (topicid)"'))
 	for topicid in xrange(1, num_topic + 1):
 		total = plpy.execute('SELECT SUM(topics[%d] + %f) total FROM word_topic_%s' % (topicid, beta, label))[0]['total']
 		plpy.execute("""INSERT INTO topic_desc_%s 
@@ -204,7 +204,7 @@ RETURNS text AS $$
 			self.doc_topic = 'doc_topic' + label + '_pred'
 			plpy.execute('DROP TABLE IF EXISTS %s' % self.doc_topic)
 			plpy.execute('CREATE TABLE %s(docid int4, topics int4[]) ' % (self.doc_topic) \
-				+ m4_ifdef(`GREENPLUM', `" WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (docid)"'))
+				m4_ifdef(`__GREENPLUM__', `+ " WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (docid)"'))
 
 			str_sql = 'SELECT sum(topics) topics FROM %s'
 			count_z_t = plpy.execute(str_sql % (self.word_topic))
@@ -214,10 +214,10 @@ RETURNS text AS $$
 
 			plpy.execute('DROP TABLE IF EXISTS doc_word_topic_0')
 			plpy.execute('CREATE TABLE doc_word_topic_0(docid int4, wordid int4, topics int4[])' \
-				+ m4_ifdef(`GREENPLUM', `" WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (docid)"'))
+				m4_ifdef(`__GREENPLUM__', `+ " WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (docid)"'))
 			plpy.execute('DROP TABLE IF EXISTS doc_word_topic_1')
 			plpy.execute('CREATE TABLE doc_word_topic_1(docid int4, wordid int4, topics int4[])' \
-				+ m4_ifdef(`GREENPLUM', `" WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (docid)"'))
+				m4_ifdef(`__GREENPLUM__', `+ " WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (docid)"'))
 
 		def init_random(self):
 			stime = time.time()
@@ -308,20 +308,20 @@ RETURNS text AS $$
 			if self.init == True:
 				plpy.execute('DROP TABLE IF EXISTS doc_word_topic_0')
 				plpy.execute('CREATE TABLE doc_word_topic_0(docid int4, wordid int4, topics int4[])' \
-					+ m4_ifdef(`GREENPLUM', `" WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (docid)"'))
+					m4_ifdef(`__GREENPLUM__', `+ " WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (docid)"'))
 				plpy.execute('DROP TABLE IF EXISTS doc_word_topic_1')
 				plpy.execute('CREATE TABLE doc_word_topic_1(docid int4, wordid int4, topics int4[])' \
-					+ m4_ifdef(`GREENPLUM', `" WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (docid)"'))
+					m4_ifdef(`__GREENPLUM__', `+ " WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (docid)"'))
 				plpy.execute('DROP TABLE IF EXISTS %s' % self.doc_topic)
 				plpy.execute('CREATE TABLE %s(docid int4, topics int4[])' % (self.doc_topic) \
-					+ m4_ifdef(`GREENPLUM', `" WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (docid)"'))
+					m4_ifdef(`__GREENPLUM__', `+ " WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (docid)"'))
 				plpy.execute('DROP TABLE IF EXISTS %s' % (self.word_topic))
 				plpy.execute('CREATE TABLE %s(wordid int4, topics int4[])' % (self.word_topic) \
-					+ m4_ifdef(`GREENPLUM', `" WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (wordid)"'))
+					m4_ifdef(`__GREENPLUM__', `+ " WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (wordid)"'))
 				plpy.execute('DROP TABLE IF EXISTS %s' % (self.pre_joined))
 				plpy.execute("""CREATE TEMP TABLE %s (docid int4, wordid int4, topics int4[],
 					doc_topic int4[], word_topic int4[], corpus_topic int4[])""" % (self.pre_joined) \
-					+ m4_ifdef(`GREENPLUM', `" WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (docid)"'))
+					m4_ifdef(`__GREENPLUM__', `+ " WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (docid)"'))
 
 			plpy.info('counting size of vocabulary...')
 			stime = time.time()
