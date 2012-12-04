@@ -56,6 +56,15 @@ RETURNS int4[]
 AS 'MODULE_PATHNAME', 'pldaPlusGibbsPred' LANGUAGE C STRICT;
 
 CREATE OR REPLACE FUNCTION
+	MADLIB_SCHEMA.__pldaplus_gibbs_pred_fast(
+		word_count int4, words int4[], counts int4[], 
+		doc_topic_topics int4[], word_topic int4[], corpus_topic int4[], 
+		alpha float, beta float, voc_size int4, topic_num int4, iter_num int4)
+RETURNS int4[] 
+AS 'MODULE_PATHNAME', 'pldaPlusGibbsPredFast' LANGUAGE C;
+
+
+CREATE OR REPLACE FUNCTION
 	MADLIB_SCHEMA.__pldaplus_gibbs_fast(
 		word_count int4, words int4[], counts int4[], 
 		doc_topic_topics int4[], word_topic int4[], corpus_topic int4[], 
@@ -66,12 +75,7 @@ AS 'MODULE_PATHNAME', 'pldaPlusGibbsFast' LANGUAGE C;
 CREATE OR REPLACE FUNCTION
 	MADLIB_SCHEMA.__pldaplus_first_sfunc(state int4, val int4)
 RETURNS int4
-AS $$
-	global state
-	if state < 0:
-		state = val
-	return state
-$$ LANGUAGE PLPYTHONU;
+AS 'MODULE_PATHNAME', 'pldaPlusFirst' LANGUAGE C STRICT;
 
 DROP AGGREGATE IF EXISTS
 	MADLIB_SCHEMA.__pldaplus_first(int4);
@@ -143,13 +147,13 @@ RETURNS text AS $$
 			self.doc_content_topic = 'doc_content_topic' + label
 
 			plpy.execute('DROP TABLE IF EXISTS %s_0' % (self.doc_content_topic))
-			plpy.execute("""CREATE TEMP TABLE %s_0(docid int4, wordcount int4, 
+			plpy.execute("""CREATE TEMP TABLE %s_0(distid int4, docid int4, wordcount int4, 
 				words int4[], counts int4[], topics int4[])""" % (self.doc_content_topic) \
-				+ m4_ifdef(`GREENPLUM', `" WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (docid)"'))
+				+ m4_ifdef(`GREENPLUM', `" WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (distid)"'))
 			plpy.execute('DROP TABLE IF EXISTS %s_1' % (self.doc_content_topic))
-			plpy.execute("""CREATE TEMP TABLE %s_1(docid int4, wordcount int4, 
+			plpy.execute("""CREATE TEMP TABLE %s_1(distid int4, docid int4, wordcount int4, 
 				words int4[], counts int4[], topics int4[])""" % (self.doc_content_topic) \
-				+ m4_ifdef(`GREENPLUM', `" WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (docid)"'))
+				+ m4_ifdef(`GREENPLUM', `" WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (distid)"'))
 
 			plpy.execute('DROP TABLE IF EXISTS %s' % self.doc_topic)
 			plpy.execute('CREATE TABLE %s(docid int4, topics int4[])' % (self.doc_topic) \
@@ -161,13 +165,14 @@ RETURNS text AS $$
 			plpy.execute('DROP TABLE IF EXISTS %s' % (self.model))
 			plpy.execute('CREATE TABLE %s(word_topic int4[], corpus_topic int4[])' % (self.model) \
 				+ m4_ifdef(`GREENPLUM', `" WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED RANDOMLY"'))
+
 		def init_random(self):
 			stime = time.time()
 			plpy.info('initializing topics randomly...')
 			plpy.execute('TRUNCATE TABLE %s_0' % (self.doc_content_topic));
 			plpy.execute("""
 				INSERT INTO %s_0
-				SELECT docid, wordcount, words, counts, MADLIB_SCHEMA.__pldaplus_random_assign(wordcount, %s)
+				SELECT gp_segment_id, docid, wordcount, words, counts, MADLIB_SCHEMA.__pldaplus_random_assign(wordcount, %s)
 				FROM %s
 				""" % (self.doc_content_topic, self.topic_num, self.dataset))
 			etime = time.time()
@@ -224,15 +229,15 @@ RETURNS text AS $$
 			plpy.execute('TRUNCATE TABLE %s_%d' % (self.doc_content_topic, it % 2))
 			plpy.execute("""
 				INSERT INTO %s_%d
-				SELECT	docid, wordcount, words, counts,  
+				SELECT	distid, docid, wordcount, words, counts,  
 					MADLIB_SCHEMA.__pldaplus_gibbs_wfunc(
 						wordcount, words, counts, topics, 
 						word_topic, corpus_topic, 
 						%f, %f, %d, %d)
-					OVER (PARTITION BY jd.gp_segment_id ORDER BY jd.docid ASC ROWS UNBOUNDED PRECEDING) topics
+					OVER (PARTITION BY distid ORDER BY distid ASC ROWS UNBOUNDED PRECEDING) topics
 				FROM
 				(
-					SELECT dcz.gp_segment_id, dcz.docid, dcz.wordcount, dcz.words, dcz.counts, dcz.topics, chunk.word_topic, chunk.corpus_topic
+					SELECT dcz.distid, dcz.docid, dcz.wordcount, dcz.words, dcz.counts, dcz.topics, chunk.word_topic, chunk.corpus_topic
 					FROM
 					(
 						SELECT trick.docid, wzcz.word_topic, wzcz.corpus_topic
@@ -247,7 +252,7 @@ RETURNS text AS $$
 							) wz
 						) wzcz,
 						(
-							SELECT MADLIB_SCHEMA.min(docid) docid FROM %s_%d GROUP BY gp_segment_id
+							SELECT MADLIB_SCHEMA.__pldaplus_first(docid) docid FROM %s_%d GROUP BY distid
 						) trick
 
 					) chunk 
@@ -270,14 +275,14 @@ RETURNS text AS $$
 			plpy.execute('TRUNCATE TABLE %s_%d' % (self.doc_content_topic, it % 2))
 			plpy.execute("""
 				INSERT INTO %s_%d
-				SELECT	docid, wordcount, words, counts,  
+				SELECT	distid, docid, wordcount, words, counts,  
 					MADLIB_SCHEMA.__pldaplus_gibbs_fast(
 						wordcount, words, counts, topics, 
 						word_topic, corpus_topic, 
 						%f, %f, %d, %d)
 				FROM
 				(
-					SELECT dcz.gp_segment_id, dcz.docid, dcz.wordcount, dcz.words, dcz.counts, dcz.topics, chunk.word_topic, chunk.corpus_topic
+					SELECT dcz.distid, dcz.docid, dcz.wordcount, dcz.words, dcz.counts, dcz.topics, chunk.word_topic, chunk.corpus_topic
 					FROM
 					(
 						SELECT trick.docid, wzcz.word_topic, wzcz.corpus_topic
@@ -292,7 +297,7 @@ RETURNS text AS $$
 							) wz
 						) wzcz,
 						(
-							SELECT MADLIB_SCHEMA.__pldaplus_first(docid) docid FROM %s_%d GROUP BY gp_segment_id
+							SELECT MADLIB_SCHEMA.__pldaplus_first(docid) docid FROM %s_%d GROUP BY distid
 						) trick
 					) chunk 
 					RIGHT JOIN
@@ -343,15 +348,16 @@ RETURNS text AS $$
 $$ LANGUAGE plpythonu;
 
 CREATE OR REPLACE FUNCTION
-MADLIB_SCHEMA.pldaplus_predict(dataset text, topic_num int4, iter_num int4, alpha float8, beta float8, label text)
+MADLIB_SCHEMA.pldaplus_predict(dataset text, voc_size int4, topic_num int4, iter_num int4, alpha float8, beta float8, label text, runfast boolean)
 RETURNS text AS $$
 	import plpy
 	import time
 
 	class PLDA:
-		def __init__(self, dataset, topic_num, iter_num, alpha, beta, label):
+		def __init__(self, dataset, voc_size, topic_num, iter_num, alpha, beta, label):
 			plpy.info('constructing PLDA object...')
 			self.dataset = dataset
+			self.voc_size = voc_size
 			self.topic_num = topic_num
 			self.iter_num = iter_num
 			self.alpha = alpha
@@ -366,12 +372,12 @@ RETURNS text AS $$
 			self.doc_content_topic_pred_out = 'plda_plus_doc_content_topic_pred_out' + label
 			
 			plpy.execute('DROP TABLE IF EXISTS %s' % (self.doc_content_topic_pred_in))
-			plpy.execute("""CREATE TEMP TABLE %s(docid int4, wordcount int4, 
+			plpy.execute("""CREATE TEMP TABLE %s(distid int4, docid int4, wordcount int4, 
 				words int4[], counts int4[], topics int4[])""" % (self.doc_content_topic_pred_in) \
 				+ m4_ifdef(`GREENPLUM', `" WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (docid)"'))
 
 			plpy.execute('DROP TABLE IF EXISTS %s' % (self.doc_content_topic_pred_out))
-			plpy.execute("""CREATE TABLE %s(docid int4, wordcount int4, 
+			plpy.execute("""CREATE TABLE %s(distid int4, docid int4, wordcount int4, 
 				words int4[], counts int4[], topics int4[])""" % (self.doc_content_topic_pred_out) \
 				+ m4_ifdef(`GREENPLUM', `" WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY (docid)"'))
 
@@ -385,7 +391,7 @@ RETURNS text AS $$
 			plpy.execute('TRUNCATE TABLE %s' % (self.doc_content_topic_pred_in));
 			plpy.execute("""
 				INSERT INTO %s
-				SELECT docid, wordcount, words, counts, MADLIB_SCHEMA.__pldaplus_random_assign(wordcount, %s)
+				SELECT gp_segment_id, docid, wordcount, words, counts, MADLIB_SCHEMA.__pldaplus_random_assign(wordcount, %s)
 				FROM %s
 				""" % (self.doc_content_topic_pred_in, self.topic_num, self.dataset))
 			etime = time.time()
@@ -404,14 +410,14 @@ RETURNS text AS $$
 			plpy.info('infering...')
 			plpy.execute("""
 				INSERT INTO %s
-				SELECT	docid, wordcount, words, counts,  
+				SELECT	distid, docid, wordcount, words, counts,  
 					MADLIB_SCHEMA.__pldaplus_gibbs_pred(
 						wordcount, words, counts, topics, 
 						word_topic, corpus_topic, 
 						%f, %f, %d, %d)
 				FROM
 				(
-					SELECT dcz.docid, dcz.wordcount, dcz.words, dcz.counts, dcz.topics, model.word_topic, model.corpus_topic
+					SELECT distid, dcz.docid, dcz.wordcount, dcz.words, dcz.counts, dcz.topics, model.word_topic, model.corpus_topic
 					FROM %s model, %s dcz
 				) jd
 				""" % (self.doc_content_topic_pred_out, self.alpha, self.beta, self.topic_num, self.iter_num, self.model, self.doc_content_topic_pred_in)) 
@@ -419,10 +425,41 @@ RETURNS text AS $$
 			etime = time.time()
 			plpy.info('\t\ttime elapsed: %.2f seconds' % (etime - stime))
 
+		def infer_fast(self):  
+			stime = time.time()
+			plpy.info('infering...')
+			plpy.execute("""
+				INSERT INTO %s
+				SELECT	distid, docid, wordcount, words, counts,  
+					MADLIB_SCHEMA.__pldaplus_gibbs_pred_fast(
+						wordcount, words, counts, topics, 
+						word_topic, corpus_topic, 
+						%f, %f, %d, %d, %d)
+				FROM
+				(
+					SELECT dcz.distid, dcz.docid, dcz.wordcount, dcz.words, dcz.counts, dcz.topics, chunk.word_topic, chunk.corpus_topic
+					FROM
+					(
+						SELECT trick.docid, model.word_topic, model.corpus_topic
+						FROM
+						%s model,
+						(
+							SELECT MADLIB_SCHEMA.__pldaplus_first(docid) docid FROM %s dcz GROUP BY distid
+						) trick
+					) chunk 
+					RIGHT JOIN
+					%s dcz
+					ON (chunk.docid = dcz.docid)
+				) jd
+				""" % (self.doc_content_topic_pred_out, self.alpha, self.beta, self.voc_size, self.topic_num, self.iter_num, \
+					self.model, self.doc_content_topic_pred_in, self.doc_content_topic_pred_in))
+			etime = time.time()
+			plpy.info('\t\ttime elapsed: %.2f seconds' % (etime - stime))
+
 		def run(self):
 			stime = time.time()
-			plpy.info('start prediction...')
-		
+			plpy.info('start training process...')
+
 			self.init_random()
 			self.infer()
 			self.comp_doc_topic()
@@ -430,7 +467,21 @@ RETURNS text AS $$
 			etime = time.time()
 			plpy.info('finished, time elapsed: %.2f seconds' % (etime - stime))
 
-	plda = PLDA(dataset, topic_num, iter_num, alpha, beta, label)
-	plda.run()
+		def run_fast(self):
+			stime = time.time()
+			plpy.info('start training process...')
+
+			self.init_random()
+			self.infer_fast()
+			self.comp_doc_topic()
+
+			etime = time.time()
+			plpy.info('finished, time elapsed: %.2f seconds' % (etime - stime))
+
+	plda = PLDA(dataset, voc_size, topic_num, iter_num, alpha, beta, label)
+	if True == runfast:
+		plda.run_fast()
+	else:
+		plda.run()
 	return 'succeeds';
 $$ LANGUAGE plpythonu;
