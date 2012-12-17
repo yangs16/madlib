@@ -35,40 +35,43 @@ class PLDATrainer:
         plpy.execute('DROP TABLE IF EXISTS %s' % (self.work_table_0))
         plpy.execute("""
             CREATE TEMP TABLE %s(
-                distid int4, 
-                docid int4, 
-                wordcount int4, 
-                words int4[], 
-                counts int4[], 
-                topics int4[])
+                distid      INT4, 
+                docid       INT4, 
+                wordcount   INT4, 
+                words       INT4[], 
+                counts      INT4[], 
+                doc_topic   %s.__NEWPLDA_DOC_TOPIC
+                )
                 m4_ifdef(`__GREENPLUM__', 
                     `WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY
                     (distid)') 
-            """ % (self.work_table_0)) 
+            """ % (self.work_table_0, self.madlib_schema)) 
 
         plpy.execute('DROP TABLE IF EXISTS %s' % (self.work_table_1))
         plpy.execute("""
             CREATE TEMP TABLE %s(
-                distid int4, 
-                docid int4, 
-                wordcount int4, 
-                words int4[], 
-                counts int4[], 
-                topics int4[])
+                distid      INT4, 
+                docid       INT4, 
+                wordcount   INT4, 
+                words       INT4[], 
+                counts      INT4[], 
+                doc_topic   %s.__NEWPLDA_DOC_TOPIC
+                )
                 m4_ifdef(`__GREENPLUM__', 
                     `WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY
                     (distid)') 
-            """ % (self.work_table_1)) 
+            """ % (self.work_table_1, self.madlib_schema)) 
 
         plpy.execute('DROP TABLE IF EXISTS %s' % (self.model_table))
         plpy.execute("""
             CREATE TABLE %s(
-                voc_size int4, 
-                topic_num int4, 
-                alpha float8, 
-                beta float8, 
-                word_topic int4[], 
-                corpus_topic int4[])
+                voc_size        INT4, 
+                topic_num       INT4, 
+                alpha           FLOAT8, 
+                beta            FLOAT8, 
+                word_topic      INT4[], 
+                corpus_topic    INT4[]
+                )
                 m4_ifdef(`__GREENPLUM__', 
                     `WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED
                     RANDOMLY') 
@@ -77,12 +80,13 @@ class PLDATrainer:
         plpy.execute('DROP TABLE IF EXISTS %s' % (self.output_data_table))
         plpy.execute("""
             CREATE TABLE %s(
-                docid int4, 
-                wordcount int4, 
-                words int4[],
-                counts int4[],
-                topic_count int4[],
-                topic_assignment int4[]) 
+                docid               INT4, 
+                wordcount           INT4, 
+                words               INT4[],
+                counts              INT4[],
+                topic_count         INT4[],
+                topic_assignment    INT4[]
+                ) 
                 m4_ifdef(`__GREENPLUM__', 
                     `WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED
                     RANDOMLY') 
@@ -96,15 +100,13 @@ class PLDATrainer:
         plpy.execute("""
             INSERT INTO %s
             SELECT
-                gp_segment_id, 
-                docid,
-                wordcount, 
-                words, 
-                counts, 
-                %s.__newplda_random_assign(wordcount, %s)
-            FROM %s
-            """ % (self.work_table_0, self.madlib_schema, self.topic_num,
-            self.data_table))
+                gp_segment_id, docid, wordcount, words, counts, 
+                %s.__newplda_random_assign(wordcount, %s) 
+            FROM %s data
+            """ % (
+                self.work_table_0, self.madlib_schema, self.topic_num,
+                self.data_table)
+            )
 
         etime = time.time()
         plpy.info('\t\ttime elapsed: %.2f seconds' % (etime - stime))
@@ -121,20 +123,18 @@ class PLDATrainer:
         plpy.execute("""
             INSERT INTO %s
             SELECT 
-                %d, %d, %f, %f, word_topic, 
-                %s.__newplda_array_fold_add(word_topic, %d) corpus_topic
+                %d, %d, %f, %f, (model).word_topic, (model).corpus_topic 
             FROM
             (
                 SELECT
-                    %s.__newplda_count_word_topic_agg(
-                        words, counts, topics[%d:array_upper(topics, 1)], %d, %d
-                    ) word_topic
-                FROM %s 
+                    %s.__newplda_count_topic_agg(
+                        words, counts, (doc_topic).topic_assignment, %d, %d
+                    ) model
+                FROM %s work_table 
             ) wz
             """ % (
                 self.model_table, self.voc_size, self.topic_num, self.alpha,
-                self.beta, self.madlib_schema, self.topic_num,
-                self.madlib_schema, self.topic_num + 1, self.voc_size, self.topic_num,
+                self.beta, self.madlib_schema, self.voc_size, self.topic_num,
                 work_table_final)
             )
 
@@ -153,15 +153,11 @@ class PLDATrainer:
         plpy.execute("""
             INSERT INTO %s
             SELECT 
-                docid, wordcount, words, counts,
-                topics[1:%d] topic_count,
-                topics[%d:array_upper(topics, 1)] topic_assignment
+                docid, wordcount, words, counts, (doc_topic).topic_count,
+                (doc_topic).topic_assignment
             FROM
                 %s work_table
-            """ % (
-                self.output_data_table, self.topic_num, self.topic_num + 1,
-                work_table_final)
-            )
+            """ % (self.output_data_table, work_table_final))
 
         etime = time.time()
         plpy.info('\t\t\ttime elapsed: %.2f seconds' % (etime - stime))
@@ -184,14 +180,15 @@ class PLDATrainer:
             INSERT INTO %s
             SELECT  distid, docid, wordcount, words, counts,  
                 %s.__newplda_gibbs_train(
-                    wordcount, words, counts, topics, 
-                    word_topic, corpus_topic, 
-                    %f, %f, %d, %d)
+                    wordcount, words, counts, topic_count,
+                    topic_assignment, word_topic, corpus_topic, 
+                    %f, %f, %d, %d) doc_topic 
             FROM
             (
                 SELECT 
                     dcz.distid, dcz.docid, dcz.wordcount, dcz.words,
-                    dcz.counts, dcz.topics, chunk.word_topic,
+                    dcz.counts, (dcz.doc_topic).topic_count,
+                    (dcz.doc_topic).topic_assignment, chunk.word_topic,
                     chunk.corpus_topic
                 FROM
                 (
@@ -200,14 +197,12 @@ class PLDATrainer:
                     FROM
                     (
                         SELECT 
-                            word_topic, 
-                            %s.__newplda_array_fold_add(word_topic, %d)
-                            corpus_topic 
+                            (model).word_topic, (model).corpus_topic 
                         FROM
                         (
                             SELECT
-                                %s.__newplda_count_word_topic_agg(words, counts,
-                                topics[%d:array_upper(topics, 1)], %d, %d) word_topic
+                                %s.__newplda_count_topic_agg(words, counts,
+                                (doc_topic).topic_assignment, %d, %d) model
                             FROM %s dcz 
                         ) wz
                     ) wzcz,
@@ -224,10 +219,9 @@ class PLDATrainer:
             ) jd
             """ % (
                 work_table_out, self.madlib_schema, self.alpha, self.beta,
-                self.voc_size, self.topic_num, self.madlib_schema,
-                self.topic_num, self.madlib_schema, self.topic_num + 1,
-                self.voc_size, self.topic_num, work_table_in,
-                self.madlib_schema, work_table_in, work_table_in)
+                self.voc_size, self.topic_num, self.madlib_schema, self.voc_size,
+                self.topic_num, work_table_in, self.madlib_schema,
+                work_table_in, work_table_in)
             )
 
         etime = time.time()
@@ -267,46 +261,49 @@ class PLDAPredictor:
         self.beta = rv[0]['beta']
 
         self.doc_topic = output_table
-        self.doc_content_topic_pred_in = 'doc_content_topic_pred_in'
-        self.doc_content_topic_pred_out = 'doc_content_topic_pred_out'
+        self.doc_content_topic_pred_in = '__work_table_in__'
+        self.doc_content_topic_pred_out = '_word_table_out__'
         
         plpy.execute('DROP TABLE IF EXISTS %s' % (self.doc_content_topic_pred_in)) 
         plpy.execute("""
             CREATE TEMP TABLE %s(
-                distid int4, 
-                docid int4, 
-                wordcount int4, 
-                words int4[], 
-                counts int4[], 
-                topics int4[])
+                distid      INT4, 
+                docid       INT4, 
+                wordcount   INT4, 
+                words       INT4[], 
+                counts      INT4[], 
+                doc_topic   %s.__NEWPLDA_DOC_TOPIC
+                )
                 m4_ifdef(`__GREENPLUM__', 
                     `WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY
                     (docid)') 
-            """ % (self.doc_content_topic_pred_in)) 
+            """ % (self.doc_content_topic_pred_in, self.madlib_schema)) 
 
         plpy.execute('DROP TABLE IF EXISTS %s' % (self.doc_content_topic_pred_out))
         plpy.execute("""
             CREATE TEMP TABLE %s(
-                distid int4, 
-                docid int4, 
-                wordcount int4, 
-                words int4[], 
-                counts int4[], 
-                topics int4[])
+                distid      INT4, 
+                docid       INT4, 
+                wordcount   INT4, 
+                words       INT4[], 
+                counts      INT4[], 
+                doc_topic   %s.__NEWPLDA_DOC_TOPIC
+                )
                 m4_ifdef(`__GREENPLUM__', 
                     `WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY
                     (docid)') 
-            """ % (self.doc_content_topic_pred_out)) 
+            """ % (self.doc_content_topic_pred_out, self.madlib_schema)) 
 
         plpy.execute('DROP TABLE IF EXISTS %s' % self.doc_topic)
         plpy.execute("""
             CREATE TABLE %s(
-                docid int4, 
-                wordcount int4,
-                words int4[],
-                counts int4[],
-                topic_count int4[], 
-                topic_assignment int4[])
+                docid               INT4, 
+                wordcount           INT4,
+                words               INT4[],
+                counts              INT4[],
+                topic_count         INT4[], 
+                topic_assignment    INT4[]
+                )
                 m4_ifdef(`__GREENPLUM__', 
                     `WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY
                     (docid)') 
@@ -319,9 +316,10 @@ class PLDAPredictor:
         plpy.execute('TRUNCATE TABLE %s' % (self.doc_content_topic_pred_in));
         plpy.execute("""
             INSERT INTO %s
-            SELECT gp_segment_id, docid, wordcount, words, counts, 
-                   %s.__newplda_random_assign(wordcount, %s)
-            FROM %s
+            SELECT 
+                gp_segment_id, docid, wordcount, words, counts,
+                %s.__newplda_random_assign(wordcount, %s) doc_topic 
+            FROM %s data
             """ % (
                 self.doc_content_topic_pred_in, self.madlib_schema,
                 self.topic_num, self.test_table)
@@ -330,16 +328,15 @@ class PLDAPredictor:
         etime = time.time()
         plpy.info('\t\ttime elapsed: %.2f seconds' % (etime - stime))
 
-    def comp_doc_topic(self):
+    def gen_output_table(self):
         plpy.execute('TRUNCATE TABLE %s' % (self.doc_topic))
         plpy.execute("""
             INSERT INTO %s
-            SELECT docid, wordcount, words, counts, topics[1:%d], topics[%d + 1:array_upper(topics, 1)]
-            FROM %s
-            """ % (
-                self.doc_topic, self.topic_num, self.topic_num,
-                self.doc_content_topic_pred_out)
-            )
+            SELECT 
+                docid, wordcount, words, counts, (doc_topic).topic_count,
+                (doc_topic).topic_assignment
+            FROM %s work_table_out
+            """ % ( self.doc_topic, self.doc_content_topic_pred_out))
 
     def infer(self):  
         stime = time.time()
@@ -347,24 +344,29 @@ class PLDAPredictor:
 
         plpy.execute("""
             INSERT INTO %s
-            SELECT  distid, docid, wordcount, words, counts,  
+            SELECT  
+                distid, docid, wordcount, words, counts,
                 %s.__newplda_gibbs_pred(
-                    wordcount, words, counts, topics, 
-                    word_topic, corpus_topic, 
-                    %f, %f, %d, %d, %d)
+                    wordcount, words, counts, topic_count, topic_assignment,
+                    word_topic, corpus_topic, %f, %f, %d, %d, %d) doc_topic
             FROM
             (
                 SELECT 
                     dcz.distid, dcz.docid, dcz.wordcount, dcz.words,
-                    dcz.counts, dcz.topics, chunk.word_topic,
+                    dcz.counts, (dcz.doc_topic).topic_count,
+                    (dcz.doc_topic).topic_assignment, chunk.word_topic,
                     chunk.corpus_topic
                 FROM
                 (
-                    SELECT trick.docid, model.word_topic, model.corpus_topic
+                    SELECT 
+                        trick.docid, model.word_topic, model.corpus_topic
                     FROM
                     %s model,
                     (
-                        SELECT %s.__newplda_first(docid) docid FROM %s dcz GROUP BY distid
+                        SELECT
+                            %s.__newplda_first(docid) docid 
+                        FROM %s dcz
+                        GROUP BY distid
                     ) trick
                 ) chunk 
                 RIGHT JOIN
@@ -376,7 +378,8 @@ class PLDAPredictor:
                 self.alpha, self.beta, self.voc_size, self.topic_num,
                 self.iter_num, self.model_table, self.madlib_schema,
                 self.doc_content_topic_pred_in,
-                self.doc_content_topic_pred_in))
+                self.doc_content_topic_pred_in)
+            )
 
         etime = time.time()
         plpy.info('\t\ttime elapsed: %.2f seconds' % (etime - stime))
@@ -387,7 +390,7 @@ class PLDAPredictor:
 
         self.init_random()
         self.infer()
-        self.comp_doc_topic()
+        self.gen_output_table()
 
         etime = time.time()
         plpy.info('finished, time elapsed: %.2f seconds' % (etime - stime))
@@ -551,13 +554,11 @@ def get_topic_desc(
         INSERT INTO __newplda_topic_word_count__
         SELECT 
             generate_series(0, topic_num - 1) topicid,
-            %s.__newplda_unnest_and_transpose(
-                word_topic, 
-                topic_num
-            ) word_count,
+            %s.__newplda_unnest(
+                %s.newplda_util_transpose(word_topic)) word_count,
             beta
         FROM %s model
-        """ % (madlib_schema, model_table))
+        """ % (madlib_schema, madlib_schema, model_table))
 
     plpy.execute('DROP TABLE IF EXISTS __newplda_topic_word_dist__')
     plpy.execute("""
@@ -596,9 +597,7 @@ def get_topic_desc(
         FROM
         (
             SELECT
-                topicid, 
-                wordid, 
-                prob,
+                topicid, wordid, prob,
                 rank() OVER(PARTITION BY topicid ORDER BY prob DESC) r
             FROM
             (
@@ -646,7 +645,7 @@ def get_word_topic_count(madlib_schema, model_table, output_table):
         INSERT INTO %s 
         SELECT 
             generate_series(0, voc_size - 1) wordid,   
-            %s.__newplda_unnest(word_topic, topic_num) topic_count
+            %s.__newplda_unnest(word_topic) topic_count
         FROM %s
         """ % (output_table, madlib_schema, model_table))
 
@@ -683,9 +682,10 @@ def get_topic_word_count(madlib_schema, model_table, output_table):
         INSERT INTO %s 
         SELECT 
             generate_series(0, topic_num - 1) topicid,   
-            %s.__newplda_unnest_and_transpose(word_topic, topic_num) word_count
+            %s.__newplda_unnest(
+                %s.newplda_util_transpose(word_topic)) word_count
         FROM %s model
-        """ % (output_table, madlib_schema, model_table))
+        """ % (output_table, madlib_schema, madlib_schema, model_table))
 
 """
 @brief Normalize the vector using L1 norm with smoothing
@@ -703,70 +703,10 @@ def l1_norm_with_smoothing(vector, smooth):
     return map(lambda r: float(r + abs(smooth)) / norm, vector)
 
 """
-@brief Unnest an 1-d array to a 2-d array by the specified size
-@param arr  The array to be unnested
-@param dim  The dim of unnested 1-d arrays
-@return     The unnested 2-d arrays
-"""
-def unnest(arr, dim):
-    __assert(
-        arr is not None and
-        dim is not None,
-        'Neither arr nor dim can be null')
-
-    __assert(
-        isinstance(dim, int) and 
-        dim > 0,
-        'Dim should be a natural number')
-
-    __assert(
-        isinstance(arr, list) and
-        len(arr) > 0,
-        'The arr should be a non-empty array')
-
-    row_num = int(math.ceil(float(len(arr))/dim))
-    start = -dim
-    for r in xrange(row_num):
-        start += dim
-        yield arr[start:start + dim]
-
-"""
-@brief Unnest an 1-d array to a 2-d array by the specified size and then
-transpose
-@param arr  The array to be unnested
-@param dim  The dim of unnested 1-d arrays
-@return     The unnested and transposed 2-d arrays
-"""
-def unnest_and_transpose(arr, dim):        
-    __assert(
-        arr is not None and
-        dim is not None,
-        'Neither arr nor dim can be null')
-
-    __assert(
-        isinstance(dim, int) and 
-        dim > 0,
-        'Dim should be a natural number')
-
-    __assert(
-        isinstance(arr, list) and
-        len(arr) > 0,
-        'The arr should be a non-empty array')
-
-    row_num = min(dim, len(arr))
-    for r in xrange(row_num):
-        row = []
-        idx = r
-        while idx < len(arr):
-            row.append(arr[idx])
-            idx += dim
-        yield row
-
-"""
 @brief Checks the vocabulary and converts non-continous wordids into continuous
 integers ranging from 0 to voc_size - 1. 
 @param vocab_table  The vocabulary table in the form of 
-                    <wordid::int4, word::text>
+                    <wordid::INT4, word::text>
 @param out_table    The normalized vocabulary table 
 """
 def norm_vocab(vocab_table, out_table):
@@ -979,14 +919,14 @@ def __check_data_table(data_table):
             SELECT count(*) cnt FROM pg_attribute 
             WHERE 
                 attrelid = '%s'::regclass AND
-                ((atttypid = 'int4'::regtype AND attname = 'docid') OR
-                (atttypid = 'int4'::regtype AND attname = 'wordid') OR
-                (atttypid = 'int4'::regtype AND attname = 'count'))
+                ((atttypid = 'INT4'::regtype AND attname = 'docid') OR
+                (atttypid = 'INT4'::regtype AND attname = 'wordid') OR
+                (atttypid = 'INT4'::regtype AND attname = 'count'))
             """ % (data_table))
         __assert(
            rv[0]['cnt'] == 3, 
            """
-           The docid::int4, wordid::int4, count::int4 should exisit in the %s
+           The docid::INT4, wordid::INT4, count::INT4 should exisit in the %s
            """ % (data_table))
     except:
         plpy.error("""
@@ -1077,12 +1017,12 @@ def __check_vocab_table(vocab_table):
             SELECT count(*) cnt FROM pg_attribute 
             WHERE 
                 attrelid = '%s'::regclass AND
-                ((atttypid = 'int4'::regtype AND attname = 'wordid') OR
+                ((atttypid = 'INT4'::regtype AND attname = 'wordid') OR
                 (atttypid = 'text'::regtype AND attname = 'word'))
             """ % (vocab_table))
         __assert(
            rv[0]['cnt'] == 2, 
-           'The wordid::int4, word::text should exisit in %s' % (vocab_table))
+           'The wordid::INT4, word::text should exisit in %s' % (vocab_table))
     except:
         plpy.error("""
             The %s must exisit and should have wordid and word columnes
@@ -1098,8 +1038,8 @@ def __check_norm_vocab_table(vocab_table):
             SELECT count(*) cnt FROM pg_attribute 
             WHERE 
                 attrelid = '%s'::regclass AND
-                ((atttypid = 'int4'::regtype AND attname = 'wordid') OR
-                (atttypid = 'int4'::regtype AND attname = 'old_wordid') OR
+                ((atttypid = 'INT4'::regtype AND attname = 'wordid') OR
+                (atttypid = 'INT4'::regtype AND attname = 'old_wordid') OR
                 (atttypid = 'text'::regtype AND attname = 'word'))
             """ % (vocab_table))
         __assert(
@@ -1124,24 +1064,24 @@ def __check_model_table(model_table):
             FROM pg_attribute 
             WHERE 
                attrelid = '%s'::regclass AND
-               ((atttypid = 'int4'::regtype AND attname = 'voc_size') OR
-               (atttypid = 'int4'::regtype AND attname = 'topic_num') OR
-               (atttypid = 'float8'::regtype AND attname = 'alpha') OR
-               (atttypid = 'float8'::regtype AND attname = 'beta') OR
-               (atttypid = 'int4[]'::regtype AND attname = 'word_topic') OR
-               (atttypid = 'int4[]'::regtype AND attname = 'corpus_topic')) 
+               ((atttypid = 'INT4'::regtype AND attname = 'voc_size') OR
+               (atttypid = 'INT4'::regtype AND attname = 'topic_num') OR
+               (atttypid = 'FLOAT8'::regtype AND attname = 'alpha') OR
+               (atttypid = 'FLOAT8'::regtype AND attname = 'beta') OR
+               (atttypid = 'INT4[][]'::regtype AND attname = 'word_topic') OR
+               (atttypid = 'INT4[]'::regtype AND attname = 'corpus_topic')) 
            """ % (model_table))
         __assert(
             rv[0]['cnt'] == 6, 
             """
-                voc_size::int4, topic_num::int4, alpha::float8, beta::float8,
-                word_topic::int4[], corpus_topic::int4[]
+                voc_size::INT4, topic_num::INT4, alpha::FLOAT8, beta::FLOAT8,
+                word_topic::INT4[], corpus_topic::INT4[]
                 should exisit in the %s
             """ % (model_table))
 
         rv = plpy.execute("""
             SELECT voc_size, topic_num, alpha, beta, 
-                array_upper(word_topic, 1) wzsize, 
+                array_upper(word_topic, 1) * array_upper(word_topic, 2) wzsize, 
                 array_upper(corpus_topic, 1) zsize
             FROM %s
             """ % (model_table))
