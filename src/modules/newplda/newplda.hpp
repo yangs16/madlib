@@ -12,7 +12,6 @@ DECLARE_UDF(newplda, newplda_gibbs_pred)
 
 DECLARE_UDF(newplda, newplda_count_topic_sfunc)
 DECLARE_UDF(newplda, newplda_count_topic_prefunc)
-DECLARE_UDF(newplda, newplda_count_topic_ffunc)
 
 DECLARE_UDF(newplda, newplda_first)
 
