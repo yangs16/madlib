@@ -193,7 +193,7 @@ class PLDATrainer:
                 FROM
                 (
                     SELECT 
-                        trick.docid, wzcz.word_topic, wzcz.corpus_topic
+                        trick.distid, trick.docid, wzcz.word_topic, wzcz.corpus_topic
                     FROM
                     (
                         SELECT 
@@ -208,14 +208,14 @@ class PLDATrainer:
                     ) wzcz,
                     (
                         SELECT
-                            %s.__newplda_first(docid) docid 
+                            distid, %s.__newplda_first(docid) docid 
                         FROM %s dcz 
                         GROUP BY distid
                     ) trick
                 ) chunk 
                 RIGHT JOIN
                 %s dcz
-                ON (chunk.docid = dcz.docid)
+                ON (chunk.docid = dcz.docid AND chunk.distid = dcz.distid)
             ) jd
             """ % (
                 work_table_out, self.madlib_schema, self.alpha, self.beta,
@@ -359,19 +359,19 @@ class PLDAPredictor:
                 FROM
                 (
                     SELECT 
-                        trick.docid, model.word_topic, model.corpus_topic
+                        trick.distid, trick.docid, model.word_topic, model.corpus_topic
                     FROM
                     %s model,
                     (
                         SELECT
-                            %s.__newplda_first(docid) docid 
+                            distid, %s.__newplda_first(docid) docid 
                         FROM %s dcz
                         GROUP BY distid
                     ) trick
                 ) chunk 
                 RIGHT JOIN
                 %s dcz
-                ON (chunk.docid = dcz.docid)
+                ON (chunk.docid = dcz.docid AND chunk.distid = dcz.distid)
             ) jd
             """ % (
                 self.doc_content_topic_pred_out, self.madlib_schema,
