@@ -95,53 +95,51 @@ static int32_t __newplda_gibbs_sample(
  * learned topic models. The learned topic modesl are passed to this function
  * in the first call and then transfered to the rest calls through
  * args.mSysInfo->user_fctx for efficiency. 
- * @param args[0]           The word count in the document
- * @param args[1]           The unique words in the documents
- * @param args[2]           The counts of each unique words
- * @param args[3]           The topic counts in the document
- * @param args[4]           The topic assignments in the document
- * @param args[5]           The word topic counts, not null for the first call
+ * @param args[0]           The unique words in the documents
+ * @param args[1]           The counts of each unique words
+ * @param args[2]           The topic counts in the document
+ * @param args[3]           The topic assignments in the document
+ * @param args[4]           The word topic counts, not null for the first call
  *                          in each segment, but null for the rest calls for
  *                          efficiency, refer to the tricks in the join
  *                          operation in the sql calling this function
- * @param args[6]           The corpus topic counts, not null for the first
+ * @param args[5]           The corpus topic counts, not null for the first
  *                          call in each segment, but null for the rest calls
  *                          for efficiency, refer to the tricks in the join
  *                          operation in the sql calling this function
- * @param args[7]           The Dirichlet parameter for per-document topic
+ * @param args[6]           The Dirichlet parameter for per-document topic
  *                          multinomial, i.e. alpha
- * @param args[8]           The Dirichlet parameter for per-topic word
+ * @param args[7]           The Dirichlet parameter for per-topic word
  *                          multinomial, i.e. beta
- * @param args[9]           The size of vocabulary
- * @param args[10]           The number of topics
- * @param args[11]          The nunber of iterations (e.g. 20)
+ * @param args[8]           The size of vocabulary
+ * @param args[9]           The number of topics
+ * @param args[10]          The nunber of iterations (e.g. 20)
  * @return                  The predicted topic counts and topic assignments for
  *                          the document
  **/
 AnyType newplda_gibbs_pred::run(AnyType & args)
 {
-    int32_t word_count = args[0].getAs<int32_t>();
-    ArrayHandle<int32_t> words = args[1].getAs<ArrayHandle<int32_t> >();
-    ArrayHandle<int32_t> counts = args[2].getAs<ArrayHandle<int32_t> >();
-    ArrayHandle<int32_t> topic_count = args[3].getAs<ArrayHandle<int32_t> >();
-    ArrayHandle<int32_t> topic_assignment = args[4].getAs<ArrayHandle<int32_t> >();
+    ArrayHandle<int32_t> words = args[0].getAs<ArrayHandle<int32_t> >();
+    ArrayHandle<int32_t> counts = args[1].getAs<ArrayHandle<int32_t> >();
+    MutableArrayHandle<int32_t> topic_count = args[2].getAs<MutableArrayHandle<int32_t> >();
+    MutableArrayHandle<int32_t> topic_assignment = args[3].getAs<MutableArrayHandle<int32_t> >();
 
-    double alpha = args[7].getAs<double>();
-    double beta = args[8].getAs<double>();
-    int32_t voc_size = args[9].getAs<int32_t>();
-    int32_t topic_num = args[10].getAs<int32_t>();
-    int32_t iter_num = args[11].getAs<int32_t>();
+    double alpha = args[6].getAs<double>();
+    double beta = args[7].getAs<double>();
+    int32_t voc_size = args[8].getAs<int32_t>();
+    int32_t topic_num = args[9].getAs<int32_t>();
+    int32_t iter_num = args[10].getAs<int32_t>();
 
     int32_t __state_size = (voc_size + 1) * topic_num;
     if (!args.getSysInfo()->user_fctx)
     {
-        if(args[5].isNull() || args[6].isNull()){
+        if(args[4].isNull() || args[5].isNull()){
             throw std::domain_error(
                 "The parameters word_topic and corpus_topic should not be \
                 null for the first call of newplda_gibbs_pred"); 
         }
-        ArrayHandle<int32_t> word_topic = args[5].getAs<ArrayHandle<int32_t> >();
-        ArrayHandle<int32_t> corpus_topic = args[6].getAs<ArrayHandle<int32_t> >();
+        ArrayHandle<int32_t> word_topic = args[4].getAs<ArrayHandle<int32_t> >();
+        ArrayHandle<int32_t> corpus_topic = args[5].getAs<ArrayHandle<int32_t> >();
 
         args.getSysInfo()->user_fctx =
             MemoryContextAllocZero(
@@ -157,44 +155,27 @@ AnyType newplda_gibbs_pred::run(AnyType & args)
         throw std::runtime_error("The args.mSysInfo->user_fctx is null.");
     }
 
-    MutableArrayHandle<int32_t> outarray_topic_count(
-        construct_array(
-            NULL, topic_num, INT4TI.oid, INT4TI.len, INT4TI.byval,
-            INT4TI.align));
-    memcpy(
-        outarray_topic_count.ptr(), topic_count.ptr(), topic_num *
-        sizeof(int32_t));
-
-    MutableArrayHandle<int32_t> outarray_topic_assignment(
-        construct_array(
-            NULL, word_count, INT4TI.oid, INT4TI.len, INT4TI.byval,
-            INT4TI.align));
-    memcpy(
-        outarray_topic_assignment.ptr(), topic_assignment.ptr(), word_count *
-        sizeof(int32_t));
-
     int32_t unique_word_count = words.size();
     for(int it = 0; it < iter_num; it++){
         int32_t word_index = 0;
         for(int32_t i = 0; i < unique_word_count; i++) {
             int32_t wordid = words[i];
             for(int32_t j = 0; j < counts[i]; j++){
-                int32_t topic = outarray_topic_assignment[word_index];
+                int32_t topic = topic_assignment[word_index];
                 int32_t retopic = __newplda_gibbs_sample(
-                    topic_num, topic, outarray_topic_count.ptr(), state +
+                    topic_num, topic, topic_count.ptr(), state +
                     wordid * topic_num, state + voc_size * topic_num, alpha,
                     beta);
 
-                outarray_topic_assignment[word_index] = retopic;
-                outarray_topic_count[topic]--;
-                outarray_topic_count[retopic]++;
+                topic_assignment[word_index] = retopic;
+                topic_count[topic]--;
+                topic_count[retopic]++;
                 word_index++;
             }
         }
     }
-
     AnyType tuple;
-    tuple << outarray_topic_count << outarray_topic_assignment;
+    tuple << topic_count << topic_assignment;
     return tuple;
 }
 
@@ -204,51 +185,49 @@ AnyType newplda_gibbs_pred::run(AnyType & args)
  * corpus topic counts are passed to this function in the first call and
  * then transfered to the rest calls through args.mSysInfo->user_fctx for
  * efficiency. 
- * @param args[0]           The word count in the document
- * @param args[1]           The unique words in the documents
- * @param args[2]           The counts of each unique words
- * @param args[3]           The topic counts in the document
- * @param args[4]           The topic assignments in the document
- * @param args[5]           The word topic counts, not null for the first call
+ * @param args[0]           The unique words in the documents
+ * @param args[1]           The counts of each unique words
+ * @param args[2]           The topic counts in the document
+ * @param args[3]           The topic assignments in the document
+ * @param args[4]           The word topic counts, not null for the first call
  *                          in each segment, but null for the rest calls for
  *                          efficiency, refer to the tricks in the join
  *                          operation in the sql calling this function
- * @param args[6]           The corpus topic counts, not null for the first
+ * @param args[5]           The corpus topic counts, not null for the first
  *                          call in each segment, but null for the rest calls
  *                          for efficiency, refer to the tricks in the join
  *                          operation in the sql calling this function
- * @param args[7]           The Dirichlet parameter for per-document topic
+ * @param args[6]           The Dirichlet parameter for per-document topic
  *                          multinomial, i.e. alpha
- * @param args[8]           The Dirichlet parameter for per-topic word
+ * @param args[7]           The Dirichlet parameter for per-topic word
  *                          multinomial, i.e. beta
- * @param args[9]           The size of vocabulary
- * @param args[10]          The number of topics
+ * @param args[8]           The size of vocabulary
+ * @param args[9]          The number of topics
  * @return                  The updated topic counts and topic assignments for
  *                          the document
  **/
 AnyType newplda_gibbs_train::run(AnyType & args)
 {
-    int32_t word_count = args[0].getAs<int32_t>();
-    ArrayHandle<int32_t> words = args[1].getAs<ArrayHandle<int32_t> >();
-    ArrayHandle<int32_t> counts = args[2].getAs<ArrayHandle<int32_t> >();
-    ArrayHandle<int32_t> topic_count = args[3].getAs<ArrayHandle<int32_t> >();
-    ArrayHandle<int32_t> topic_assignment = args[4].getAs<ArrayHandle<int32_t> >();
+    ArrayHandle<int32_t> words = args[0].getAs<ArrayHandle<int32_t> >();
+    ArrayHandle<int32_t> counts = args[1].getAs<ArrayHandle<int32_t> >();
+    MutableArrayHandle<int32_t> topic_count = args[2].getAs<MutableArrayHandle<int32_t> >();
+    MutableArrayHandle<int32_t> topic_assignment = args[3].getAs<MutableArrayHandle<int32_t> >();
 
-    double alpha = args[7].getAs<double>();
-    double beta = args[8].getAs<double>();
-    int32_t voc_size = args[9].getAs<int32_t>();
-    int32_t topic_num = args[10].getAs<int32_t>();
+    double alpha = args[6].getAs<double>();
+    double beta = args[7].getAs<double>();
+    int32_t voc_size = args[8].getAs<int32_t>();
+    int32_t topic_num = args[9].getAs<int32_t>();
 
     int32_t __state_size = (voc_size + 1) * topic_num;
     if (!args.getSysInfo()->user_fctx)
     {
-        if(args[5].isNull() || args[6].isNull()){
+        if(args[4].isNull() || args[5].isNull()){
             throw std::domain_error(
                 "The parameters word_topic and corpus_topic should not be null \
                 for the first call of newplda_gibbs_train"); 
         }
-        ArrayHandle<int32_t> word_topic = args[5].getAs<ArrayHandle<int32_t> >();
-        ArrayHandle<int32_t> corpus_topic = args[6].getAs<ArrayHandle<int32_t> >();
+        ArrayHandle<int32_t> word_topic = args[4].getAs<ArrayHandle<int32_t> >();
+        ArrayHandle<int32_t> corpus_topic = args[5].getAs<ArrayHandle<int32_t> >();
 
         args.getSysInfo()->user_fctx =
             MemoryContextAllocZero(
@@ -265,44 +244,29 @@ AnyType newplda_gibbs_train::run(AnyType & args)
         throw std::runtime_error("The args.mSysInfo->user_fctx is null.");
     }
 
-    MutableArrayHandle<int32_t> outarray_topic_count(
-        construct_array(
-            NULL, topic_num, INT4TI.oid, INT4TI.len, INT4TI.byval,
-            INT4TI.align)); 
-    memcpy(
-        outarray_topic_count.ptr(), topic_count.ptr(), topic_num *
-        sizeof(int32_t));
-
-    MutableArrayHandle<int32_t> outarray_topic_assignment(
-        construct_array(
-            NULL, word_count, INT4TI.oid, INT4TI.len, INT4TI.byval,
-            INT4TI.align));
-    memcpy(
-        outarray_topic_assignment.ptr(), topic_assignment.ptr(), word_count *
-        sizeof(int32_t));
-
     int32_t unique_word_count = words.size();
     int32_t word_index = 0;
     for(int32_t i = 0; i < unique_word_count; i++) {
         int32_t wordid = words[i];
         for(int32_t j = 0; j < counts[i]; j++){
-            int32_t topic = outarray_topic_assignment[word_index];
+            int32_t topic = topic_assignment[word_index];
             int32_t retopic = __newplda_gibbs_sample(
-                topic_num, topic, outarray_topic_count.ptr(), state + wordid *
+                topic_num, topic, topic_count.ptr(), state + wordid *
                 topic_num, state + voc_size * topic_num, alpha, beta);
-            outarray_topic_assignment[word_index] = retopic;
-            outarray_topic_count[topic]--;
-            outarray_topic_count[retopic]++;
+            topic_assignment[word_index] = retopic;
+            topic_count[topic]--;
+            topic_count[retopic]++;
 
             state[voc_size * topic_num + topic]--;
             state[voc_size * topic_num + retopic]++;
             state[wordid * topic_num + topic]--;
             state[wordid * topic_num + retopic]++;
+            word_index++;
         }
     }
 
     AnyType tuple;
-    tuple << outarray_topic_count << outarray_topic_assignment;
+    tuple << topic_count << topic_assignment;
     return tuple;
 }
 
@@ -326,24 +290,24 @@ AnyType newplda_random_assign::run(AnyType & args)
         throw std::invalid_argument(
             "The topic number should be positive integer.");
 
-    MutableArrayHandle<int32_t> outarray_topic_count(
+    MutableArrayHandle<int32_t> topic_count(
         construct_array(
             NULL, topic_num, INT4TI.oid, INT4TI.len, INT4TI.byval,
             INT4TI.align));
 
-    MutableArrayHandle<int32_t> outarray_topic_assignment(
+    MutableArrayHandle<int32_t> topic_assignment(
         construct_array(
             NULL, word_count, INT4TI.oid, INT4TI.len, INT4TI.byval,
             INT4TI.align));
 
     for(int32_t i = 0; i < word_count; i++){
         int32_t topic = rand() % topic_num;
-        outarray_topic_count[topic] += 1;
-        outarray_topic_assignment[i] = topic;  
+        topic_count[topic] += 1;
+        topic_assignment[i] = topic;  
     }
 
     AnyType tuple;
-    tuple << outarray_topic_count << outarray_topic_assignment;
+    tuple << topic_count << topic_assignment;
     return tuple;
 }
 
@@ -403,49 +367,16 @@ AnyType newplda_count_topic_sfunc::run(AnyType & args)
  **/
 AnyType newplda_count_topic_prefunc::run(AnyType & args)
 {
-    MutableArrayHandle<int32_t> inarray1 = args[0].getAs<MutableArrayHandle<int32_t> >();
-    ArrayHandle<int32_t> inarray2 = args[1].getAs<ArrayHandle<int32_t> >();
+    MutableArrayHandle<int32_t> state1 = args[0].getAs<MutableArrayHandle<int32_t> >();
+    ArrayHandle<int32_t> state2 = args[1].getAs<ArrayHandle<int32_t> >();
 
-    if(inarray1.size() != inarray2.size())
+    if(state1.size() != state2.size())
         throw std::invalid_argument("Invalid dimension.");
 
-    for(uint32_t i = 0; i < inarray1.size(); i++)
-        inarray1[i] += inarray2[i];
+    for(uint32_t i = 0; i < state1.size(); i++)
+        state1[i] += state2[i];
     
-    return inarray1;
-}
-
-AnyType newplda_count_topic_ffunc::run(AnyType & args)
-{
-    ArrayHandle<int32_t> state = args[0].getAs<ArrayHandle<int32_t> >();
-    int32_t ndims = state.dims();
-    if(ndims != 2)
-        throw std::runtime_error("Invalid state.");
-
-    int32_t voc_size = state.sizeOfDim(0) - 1;
-    int32_t topic_num = state.sizeOfDim(1);
-        
-    int dims[2] = {voc_size, topic_num};
-    int lbs[2] = {1, 1};
-
-    MutableArrayHandle<int32_t> word_topic(
-        construct_md_array(
-            NULL, NULL, 2, dims, lbs, INT4TI.oid, INT4TI.len, INT4TI.byval,
-            INT4TI.align));
-    memcpy(
-        word_topic.ptr(), state.ptr(), voc_size * topic_num * sizeof(int32_t));
-
-    MutableArrayHandle<int32_t> corpus_topic(
-        construct_array(
-            NULL, state.sizeOfDim(1), INT4TI.oid, INT4TI.len, INT4TI.byval,
-            INT4TI.align));
-    memcpy(
-        corpus_topic.ptr(), state.ptr() + voc_size * topic_num, topic_num *
-        sizeof(int32_t));
-
-    AnyType tuple;
-    tuple << word_topic << corpus_topic; 
-    return tuple;
+    return state1;
 }
 
 /**
@@ -466,7 +397,6 @@ AnyType newplda_first::run(AnyType & args)
 
 AnyType newplda_transpose::run(AnyType & args)
 {
-    
     if(args[0].isNull())
         throw std::invalid_argument("Null input.");
     

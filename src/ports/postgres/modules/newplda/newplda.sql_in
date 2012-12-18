@@ -579,7 +579,6 @@ LANGUAGE C STRICT;
  * topic models. The learned topic modesl are passed to this function in the
  * first call and then transfered to the rest calls through
  * fcinfo->flinfo->fn_extra for efficiency. 
- * @param word_count        The count of words in the document 
  * @param words             The set of unique words in the document
  * @param counts            The counts of each unique words in the document
  *                          (sum(counts) = word_count)
@@ -603,12 +602,11 @@ LANGUAGE C STRICT;
 CREATE OR REPLACE FUNCTION
 MADLIB_SCHEMA.__newplda_gibbs_pred
 (
-    word_count          INT4, 
     words               INT4[], 
     counts              INT4[], 
     topic_count         INT4[],
     topic_assignment    INT4[],
-    word_topic          INT4[], 
+    word_topic          INT4[][], 
     corpus_topic        INT4[],
     alpha               FLOAT8, 
     beta                FLOAT8,
@@ -626,7 +624,6 @@ LANGUAGE C;
  * corpus-level topic counts are passed to this function in the first call and
  * then transfered to the rest calls through fcinfo->flinfo->fn_extra for
  * efficiency. 
- * @param word_count        The count of words in the document 
  * @param words             The set of unique words in the document
  * @param counts            The counts of each unique words in the document
  *                          (sum(counts) = word_count)
@@ -649,12 +646,11 @@ LANGUAGE C;
 CREATE OR REPLACE FUNCTION
 MADLIB_SCHEMA.__newplda_gibbs_train
 (
-    word_count          INT4, 
     words               INT4[], 
     counts              INT4[],
     topic_count         INT4[],
     topic_assignment    INT4[],
-    word_topic          INT4[], 
+    word_topic          INT4[][], 
     corpus_topic        INT4[], 
     alpha               FLOAT8, 
     beta                FLOAT8, 
@@ -664,14 +660,6 @@ MADLIB_SCHEMA.__newplda_gibbs_train
 RETURNS MADLIB_SCHEMA.__newplda_doc_topic 
 AS 'MODULE_PATHNAME', 'newplda_gibbs_train'
 LANGUAGE C;
-
--- UDT for LAD model
-DROP TYPE IF EXISTS MADLIB_SCHEMA.__newplda_model;
-CREATE TYPE MADLIB_SCHEMA.__newplda_topic_count AS
-(
-    word_topic      INT4[][],
-    corpus_topic    INT4[]
-);
 
 /**
  * @brief This UDF is the sfunc for the aggregator computing the topic counts
@@ -688,14 +676,14 @@ CREATE TYPE MADLIB_SCHEMA.__newplda_topic_count AS
 CREATE OR REPLACE FUNCTION 
 MADLIB_SCHEMA.__newplda_count_topic_sfunc
 (
-    state               INT4[],
+    state               INT4[][],
     words               INT4[], 
     counts              INT4[],
     topic_assignment    INT4[], 
     voc_size            INT4, 
     topic_num           INT4
 )
-RETURNS INT4[]
+RETURNS INT4[][]
 AS 'MODULE_PATHNAME', 'newplda_count_topic_sfunc'
 LANGUAGE C;
 
@@ -709,20 +697,11 @@ LANGUAGE C;
 CREATE OR REPLACE FUNCTION 
 MADLIB_SCHEMA.__newplda_count_topic_prefunc
 (
-    state1  INT4[],
-    state2  INT4[]
+    state1  INT4[][],
+    state2  INT4[][]
 )
-RETURNS INT4[]
+RETURNS INT4[][]
 AS 'MODULE_PATHNAME', 'newplda_count_topic_prefunc'
-LANGUAGE C IMMUTABLE STRICT;
-
-CREATE OR REPLACE FUNCTION 
-MADLIB_SCHEMA.__newplda_count_topic_ffunc
-(
-    state   INT4[]
-)
-RETURNS MADLIB_SCHEMA.__newplda_topic_count
-AS 'MODULE_PATHNAME', 'newplda_count_topic_ffunc'
 LANGUAGE C IMMUTABLE STRICT;
 
 /**
@@ -754,9 +733,8 @@ MADLIB_SCHEMA.__newplda_count_topic_agg
     INT4
 )
 (
-    stype = INT4[],
-    sfunc = MADLIB_SCHEMA.__newplda_count_topic_sfunc,
-    finalfunc = MADLIB_SCHEMA.__newplda_count_topic_ffunc
+    stype = INT4[][],
+    sfunc = MADLIB_SCHEMA.__newplda_count_topic_sfunc
     m4_ifdef(
         `GREENPLUM', 
         `, prefunc = MADLIB_SCHEMA.__newplda_count_topic_prefunc'
