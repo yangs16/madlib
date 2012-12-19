@@ -91,6 +91,50 @@ static int32_t __newplda_gibbs_sample(
 }
 
 /**
+ * @brief Get the min value of an array - for parameter checking
+ * @return      The min value
+ **/
+static int32_t __min(ArrayHandle<int32_t> ah){
+    const int32_t * array = ah.ptr();
+    int32_t size = ah.size();
+    int32_t min = array[0];
+    for(int32_t i = 1; i < size; i++){
+        if(array[i] < min)
+            min = array[i];
+    }
+    return min;
+}
+
+/**
+ * @brief Get the max value of an array - for parameter checking
+ * @return      The max value
+ **/
+static int32_t __max(ArrayHandle<int32_t> ah){
+    const int32_t * array = ah.ptr();
+    int32_t size = ah.size();
+    int32_t max = array[0];
+    for(int32_t i = 1; i < size; i++){
+        if(array[i] > max)
+            max = array[i];
+    }
+    return max;
+}
+
+/**
+ * @brief Get the sum of an array - for parameter checking
+ * @return      The sum
+ **/
+static int32_t __sum(ArrayHandle<int32_t> ah){
+    const int32_t * array = ah.ptr();
+    int32_t size = ah.size();
+    int32_t sum = 0;
+    for(int32_t i = 0; i < size; i++){
+        sum += array[i];
+    }
+    return sum;
+}
+
+/**
  * @brief This function predicts the topics of words in a document given the
  * learned topic models. The learned topic modesl are passed to this function
  * in the first call and then transfered to the rest calls through
@@ -119,8 +163,18 @@ static int32_t __newplda_gibbs_sample(
  **/
 AnyType newplda_gibbs_pred::run(AnyType & args)
 {
+    if(args[0].isNull() || args[1].isNull() || args[2].isNull() ||
+       args[3].isNull() || args[6].isNull() || args[7].isNull() ||
+       args[8].isNull() || args[9].isNull())
+        throw std::invalid_argument("Null argument.");
+    
     ArrayHandle<int32_t> words = args[0].getAs<ArrayHandle<int32_t> >();
     ArrayHandle<int32_t> counts = args[1].getAs<ArrayHandle<int32_t> >();
+
+    if(words.size() != counts.size())
+        throw std::invalid_argument(
+            "Dimensions mismatch: words.size() != counts.size().");
+
     MutableArrayHandle<int32_t> topic_count = args[2].getAs<MutableArrayHandle<int32_t> >();
     MutableArrayHandle<int32_t> topic_assignment = args[3].getAs<MutableArrayHandle<int32_t> >();
 
@@ -129,6 +183,39 @@ AnyType newplda_gibbs_pred::run(AnyType & args)
     int32_t voc_size = args[8].getAs<int32_t>();
     int32_t topic_num = args[9].getAs<int32_t>();
     int32_t iter_num = args[10].getAs<int32_t>();
+
+    if(alpha <= 0)
+        throw std::invalid_argument("Invalid argument - alpha.");
+    if(beta <= 0)
+        throw std::invalid_argument("Invalid argument - beta.");
+    if(voc_size <= 0)
+        throw std::invalid_argument(
+            "Invalid argument - voc_size");
+    if(topic_num <= 0)
+        throw std::invalid_argument(
+            "Invalid argument - topic_num");
+    if(iter_num <= 0)
+        throw std::invalid_argument(
+            "Invalid argument - iter_num");
+    if(topic_count.size() != (size_t)topic_num)
+        throw std::invalid_argument(
+            "Invalid dimension - topic_count.size() != topic_num");
+    if(__min(topic_count) < 0)
+        throw std::invalid_argument("Invalid values in topic_count.");
+    if(__min(topic_assignment) < 0 || __max(topic_assignment) >= topic_num)
+        throw std::invalid_argument(
+            "Invalid values in topic_assignment.");
+    if(__min(words) < 0 || __max(words) >= voc_size)
+        throw std::invalid_argument(
+            "Invalid values in words");
+    if(__min(counts) <= 0)
+        throw std::invalid_argument(
+            "Invalid values in counts.");
+    if(__min(topic_assignment) < 0 || __max(topic_assignment) >= topic_num)
+        throw std::invalid_argument("Invalid values in topics");
+    if((size_t)__sum(counts) != topic_assignment.size())
+        throw std::invalid_argument(
+            "Dimension mismatch - sum(counts) != topic_assignment.size()");
 
     int32_t __state_size = (voc_size + 1) * topic_num;
     if (!args.getSysInfo()->user_fctx)
@@ -140,6 +227,14 @@ AnyType newplda_gibbs_pred::run(AnyType & args)
         }
         ArrayHandle<int32_t> word_topic = args[4].getAs<ArrayHandle<int32_t> >();
         ArrayHandle<int32_t> corpus_topic = args[5].getAs<ArrayHandle<int32_t> >();
+
+        if(word_topic.size() != (size_t)(voc_size * topic_num))
+            throw std::invalid_argument(
+                "Invalid dimension - word_topic.size() != voc_size * topic_num.");
+        if(__min(word_topic) < 0)
+            throw std::invalid_argument("Invalid values in word_topic.");
+        if(__min(corpus_topic) < 0)
+            throw std::invalid_argument("Invalid values in corpus_topic.");
 
         args.getSysInfo()->user_fctx =
             MemoryContextAllocZero(
@@ -208,8 +303,18 @@ AnyType newplda_gibbs_pred::run(AnyType & args)
  **/
 AnyType newplda_gibbs_train::run(AnyType & args)
 {
+    if(args[0].isNull() || args[1].isNull() || args[2].isNull() ||
+       args[3].isNull() || args[6].isNull() || args[7].isNull() ||
+       args[8].isNull() || args[9].isNull())
+        throw std::invalid_argument("Null argument.");
+
     ArrayHandle<int32_t> words = args[0].getAs<ArrayHandle<int32_t> >();
     ArrayHandle<int32_t> counts = args[1].getAs<ArrayHandle<int32_t> >();
+    
+    if(words.size() != counts.size())
+        throw std::invalid_argument(
+            "Dimensions mismatch - words.size() != counts.size().");
+
     MutableArrayHandle<int32_t> topic_count = args[2].getAs<MutableArrayHandle<int32_t> >();
     MutableArrayHandle<int32_t> topic_assignment = args[3].getAs<MutableArrayHandle<int32_t> >();
 
@@ -218,16 +323,54 @@ AnyType newplda_gibbs_train::run(AnyType & args)
     int32_t voc_size = args[8].getAs<int32_t>();
     int32_t topic_num = args[9].getAs<int32_t>();
 
+    if(alpha <= 0)
+        throw std::invalid_argument("Invalid argument - alpha.");
+    if(beta <= 0)
+        throw std::invalid_argument("Invalid argument - beta.");
+    if(voc_size <= 0)
+        throw std::invalid_argument(
+            "Invalid argument - voc_size");
+    if(topic_num <= 0)
+        throw std::invalid_argument(
+            "Invalid argument - topic_num");
+    if(topic_count.size() != (size_t)topic_num)
+        throw std::invalid_argument(
+            "Invalid dimension - topic_count.size() != topic_num.");
+    if(__min(topic_count) < 0)
+        throw std::invalid_argument("Invalid values in topic_count.");
+    if(__min(topic_assignment) < 0 || __max(topic_assignment) >= topic_num)
+        throw std::invalid_argument(
+            "Invalid values in topic_assignment.");
+    if(__min(words) < 0 || __max(words) >= voc_size)
+        throw std::invalid_argument(
+            "Invalid values in words");
+    if(__min(counts) <= 0)
+        throw std::invalid_argument(
+            "Invalid values in counts.");
+    if(__min(topic_assignment) < 0 || __max(topic_assignment) >= topic_num)
+        throw std::invalid_argument("Invalid values in topics");
+    if((size_t)__sum(counts) != topic_assignment.size())
+        throw std::invalid_argument(
+            "Dimension mismatch - sum(counts) != topic_assignment.size().");
+
     int32_t __state_size = (voc_size + 1) * topic_num;
     if (!args.getSysInfo()->user_fctx)
     {
         if(args[4].isNull() || args[5].isNull()){
-            throw std::domain_error(
-                "The parameters word_topic and corpus_topic should not be null \
-                for the first call of newplda_gibbs_train"); 
+            throw std::invalid_argument(
+                "Null argument. The word_topic and corpus_topic should not be \
+                null for the first call of newplda_gibbs_train."); 
         }
         ArrayHandle<int32_t> word_topic = args[4].getAs<ArrayHandle<int32_t> >();
         ArrayHandle<int32_t> corpus_topic = args[5].getAs<ArrayHandle<int32_t> >();
+
+        if(word_topic.size() != (size_t)(voc_size * topic_num))
+            throw std::invalid_argument(
+                "Invalid dimension - word_topic.size() != voc_size * topic_num.");
+        if(__min(word_topic) < 0)
+            throw std::invalid_argument("Invalid values in word_topic.");
+        if(__min(corpus_topic) < 0)
+            throw std::invalid_argument("Invalid values in corpus_topic.");
 
         args.getSysInfo()->user_fctx =
             MemoryContextAllocZero(
@@ -280,15 +423,16 @@ AnyType newplda_gibbs_train::run(AnyType & args)
  **/
 AnyType newplda_random_assign::run(AnyType & args)
 {
+    if(args[0].isNull() || args[1].isNull())
+        throw std::invalid_argument("Null argument.");
+
     int32_t word_count = args[0].getAs<int32_t>();
     int32_t topic_num = args[1].getAs<int32_t>();
 
     if(word_count < 1)
-        throw std::invalid_argument(
-            "The word count should be positive integer.");
+        throw std::invalid_argument( "Invalid argument - word_count.");
     if(topic_num < 1)
-        throw std::invalid_argument(
-            "The topic number should be positive integer.");
+        throw std::invalid_argument( "Invalid argument - topic_num.");
 
     MutableArrayHandle<int32_t> topic_count(
         construct_array(
@@ -325,8 +469,42 @@ AnyType newplda_random_assign::run(AnyType & args)
  **/
 AnyType newplda_count_topic_sfunc::run(AnyType & args)
 {
+    if(!(args.getFCInfo()->context && IsA(args.getFCInfo()->context, AggState)))
+        throw std::runtime_error(
+            "This function should be called in an aggregator.");
+
+    if(args[4].isNull() || args[5].isNull())
+        throw std::invalid_argument("Null input.");
+
+    if(args[1].isNull() || args[2].isNull() || args[3].isNull()) 
+        return args[0];
+
     int32_t voc_size = args[4].getAs<int32_t>();
     int32_t topic_num = args[5].getAs<int32_t>();
+    if(voc_size <= 0)
+        throw std::invalid_argument(
+            "Invalid argument - voc_size.");
+    if(topic_num <= 0)
+        throw std::invalid_argument(
+            "Invalid argument - topic_num.");
+
+    ArrayHandle<int32_t> words = args[1].getAs<ArrayHandle<int32_t> >();
+    ArrayHandle<int32_t> counts = args[2].getAs<ArrayHandle<int32_t> >();
+    ArrayHandle<int32_t> topics = args[3].getAs<ArrayHandle<int32_t> >();
+    if(words.size() != counts.size())
+        throw std::invalid_argument(
+            "Dimensions mismatch - words.size() != counts.size().");
+    if(__min(words) < 0 || __max(words) >= voc_size)
+        throw std::invalid_argument(
+            "Invalid values in words");
+    if(__min(counts) <= 0)
+        throw std::invalid_argument(
+            "Invalid values in counts.");
+    if(__min(topics) < 0 || __max(topics) >= topic_num)
+        throw std::invalid_argument("Invalid values in topics");
+    if((size_t)__sum(counts) != topics.size())
+        throw std::invalid_argument(
+            "Dimension mismatch - sum(counts) != topics.size()");
 
     MutableArrayHandle<int32_t> state(NULL);
     if(args[0].isNull()){
@@ -338,10 +516,6 @@ AnyType newplda_count_topic_sfunc::run(AnyType & args)
     } else {
         state = args[0].getAs<MutableArrayHandle<int32_t> >();
     }
-
-    ArrayHandle<int32_t> words = args[1].getAs<ArrayHandle<int32_t> >();
-    ArrayHandle<int32_t> counts = args[2].getAs<ArrayHandle<int32_t> >();
-    ArrayHandle<int32_t> topics = args[3].getAs<ArrayHandle<int32_t> >();
 
     int32_t unique_word_count = words.size();
     int32_t word_index = 0;
@@ -367,6 +541,9 @@ AnyType newplda_count_topic_sfunc::run(AnyType & args)
  **/
 AnyType newplda_count_topic_prefunc::run(AnyType & args)
 {
+    if(args[0].isNull() || args[1].isNull())
+        throw std::invalid_argument("Null argument.");
+
     MutableArrayHandle<int32_t> state1 = args[0].getAs<MutableArrayHandle<int32_t> >();
     ArrayHandle<int32_t> state2 = args[1].getAs<ArrayHandle<int32_t> >();
 
@@ -398,7 +575,7 @@ AnyType newplda_first::run(AnyType & args)
 AnyType newplda_transpose::run(AnyType & args)
 {
     if(args[0].isNull())
-        throw std::invalid_argument("Null input.");
+        throw std::invalid_argument("Null argument.");
     
     ArrayHandle<int32_t> matrix = args[0].getAs<ArrayHandle<int32_t> >();
     if(matrix.dims() != 2)
@@ -434,9 +611,14 @@ typedef struct __sr_ctx{
 
 void * newplda_unnest::SRF_init(AnyType &args) 
 {
-    sr_ctx * ctx = new sr_ctx;
+    if (args[0].isNull())
+        throw std::invalid_argument("Null argument.");
 
     ArrayHandle<int32_t> inarray = args[0].getAs<ArrayHandle<int32_t> >();
+    if(inarray.dims() != 2)
+        throw std::invalid_argument("Invalid dimension.");
+
+    sr_ctx * ctx = new sr_ctx;
     ctx->inarray = inarray.ptr();
     ctx->maxcall = inarray.sizeOfDim(0);
     ctx->dim = inarray.sizeOfDim(1);
@@ -457,7 +639,6 @@ AnyType newplda_unnest::SRF_next(void *user_fctx, bool *is_last_call)
         construct_array(
             NULL, ctx->dim, INT4TI.oid, INT4TI.len, INT4TI.byval,
             INT4TI.align));
-
     memcpy(
         outarray.ptr(), ctx->inarray + ctx->curcall * ctx->dim, ctx->dim *
         sizeof(int32_t));

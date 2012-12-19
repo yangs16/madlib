@@ -119,7 +119,7 @@ where \c wordid refers the word ID (the index of a word in the vocabulary) and
   is achieved using the following UDF 
     <pre>
         SELECT \ref newplda_predict('<em>data_table</em>',
-        '<em>model_table</em>', '<em>output_table</em>', '<em>iter_num</em>');
+        '<em>model_table</em>', '<em>output_table</em>');
     </pre>
     
     This function stores the prediction results in
@@ -260,7 +260,7 @@ appropriate parameters. Here is an example.
 commands: 
 
 \code
-    SELECT MADLib.newplda_predict('my_testing', 'my_model', 'my_pred', 20);
+    SELECT MADLib.newplda_predict('my_testing', 'my_model', 'my_pred');
 \endcode
 
     After a successful run of the newplda_predict() function, the prediction
@@ -359,7 +359,6 @@ $$ LANGUAGE PLPYTHONU;
  *                      where docid, wordid, and count are all non-negative 
  *                      integers.
  * @param model_table   Table storing the learned models
- * @param iter_num      Number of iterations (e.g. 20)
  * @param output_table  Table storing per-document topic counts and topic 
  *                      assignments
  **/
@@ -368,14 +367,11 @@ MADLIB_SCHEMA.newplda_predict
 (
     data_table      TEXT,
     model_table     TEXT,
-    output_table    TEXT,
-    iter_num        INT4 
+    output_table    TEXT
 )
 RETURNS SETOF MADLIB_SCHEMA.newplda_result AS $$
     PythonFunctionBodyOnly(`newplda', `newplda')
-    newplda.plda_predict(
-        schema_madlib, data_table, model_table, iter_num, output_table
-    )
+    newplda.plda_predict(schema_madlib, data_table, model_table, output_table)
     return [[
         output_table, 
         'per-doc topic distribution and per-word topic assignments']]

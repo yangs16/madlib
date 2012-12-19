@@ -475,7 +475,7 @@ def plda_train(
 @param output_table     name of output table
 """
 def plda_predict(
-    madlib_schema, test_table, model_table, iter_num, output_table):
+    madlib_schema, test_table, model_table, output_table, iter_num = 20):
     __assert(
         test_table is not None and
         model_table is not None and
