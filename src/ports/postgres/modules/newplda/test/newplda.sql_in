@@ -78,13 +78,12 @@ SELECT MADLib.newplda_train(
 SELECT MADLib.newplda_predict(
     'plda_testing', 
     'plda_model', 
-    'plda_pred',
-    1);
+    'plda_pred');
 
 SELECT MADLib.newplda_get_topic_desc(
     'plda_model', 
     'plda_vocab', 
-    1,
+    5,
     'topic_word_desc'); 
 
 SELECT MADLib.newplda_get_word_topic_count(
@@ -96,6 +95,7 @@ SELECT MADLib.newplda_get_topic_word_count(
     'topic_word_count'); 
 
 SELECT MADLib.newplda_util_index_sort(array[1, 4, 2, 3]); 
+SELECT MADLib.newplda_util_transpose(array[[1, 2, 3],[4, 5, 6]]); 
 SELECT MADLib.newplda_util_norm_with_smoothing(array[1, 4, 2, 3], 0.1); 
 
 SELECT * 
