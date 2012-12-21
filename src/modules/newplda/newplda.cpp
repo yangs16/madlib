@@ -2,7 +2,7 @@
  *
  * @file newplda.cpp
  *
- * @brief Functions for Parallel Latent Dirichlet Allocation
+ * @brief Functions for Latent Dirichlet Allocation
  *
  * @date Dec 13, 2012
  *//* ----------------------------------------------------------------------- */
@@ -10,6 +10,10 @@
 
 #include <dbconnector/dbconnector.hpp>
 #include <math.h>
+#include <iostream>
+#include <algorithm>
+#include <functional>
+#include <numeric>
 #include "newplda.hpp"
 
 namespace madlib {
@@ -28,7 +32,7 @@ typedef struct __type_info{
         madlib_get_typlenbyvalalign(oid, &len, &byval, &align);
     }
 } type_info;
-type_info INT4TI(INT4OID);
+static type_info INT4TI(INT4OID);
 
 /**
  * @brief This function samples a new topic for a word in a document based on
@@ -45,13 +49,21 @@ type_info INT4TI(INT4OID);
  *                      multinomial
  * @return retopic      The new topic assignment to the word
  * @note The topic ranges from 0 to topic_num - 1. 
+ *
+ * @note For the sake of performance, this function will not check the validity
+ * of parameters. The caller will ensure that the three pointers all have non-null
+ * values and the lengths are the actual lengths of the arrays. And this
+ * function is local to this file only, so this function cannot be maliciously
+ * called by intruders.
  **/
 static int32_t __newplda_gibbs_sample(
     int32_t topic_num, int32_t topic, int32_t * count_d_z, int32_t * count_w_z,
-    int32_t * count_z, float8 alpha, float8 beta) 
+    int32_t * count_z, double alpha, double beta) 
 {
     /* The cumulative probability distribution of the topics */
     double * topic_prs = new double[topic_num]; 
+    if(!topic_prs)
+        throw std::runtime_error("Out of memory.");
 
     /* Calculate topic (unnormalised) probabilities */
     double total_unpr = 0;
@@ -78,7 +90,7 @@ static int32_t __newplda_gibbs_sample(
         topic_prs[i] /= total_unpr;
 
     /* Draw a topic at random */
-    float8 r = drand48();
+    double r = drand48();
     int32_t retopic = 0;
     while (true) {
         if (retopic == topic_num - 1 || r < topic_prs[retopic])
@@ -93,45 +105,34 @@ static int32_t __newplda_gibbs_sample(
 /**
  * @brief Get the min value of an array - for parameter checking
  * @return      The min value
+ * @note The caller will ensure that ah is always non-null.
  **/
 static int32_t __min(ArrayHandle<int32_t> ah){
     const int32_t * array = ah.ptr();
     int32_t size = ah.size();
-    int32_t min = array[0];
-    for(int32_t i = 1; i < size; i++){
-        if(array[i] < min)
-            min = array[i];
-    }
-    return min;
+    return *std::min_element(array, array + size);
 }
 
 /**
  * @brief Get the max value of an array - for parameter checking
  * @return      The max value
+ * @note The caller will ensure that ah is always non-null.
  **/
 static int32_t __max(ArrayHandle<int32_t> ah){
     const int32_t * array = ah.ptr();
     int32_t size = ah.size();
-    int32_t max = array[0];
-    for(int32_t i = 1; i < size; i++){
-        if(array[i] > max)
-            max = array[i];
-    }
-    return max;
+    return *std::max_element(array, array + size);
 }
 
 /**
  * @brief Get the sum of an array - for parameter checking
  * @return      The sum
+ * @note The caller will ensure that ah is always non-null.
  **/
 static int32_t __sum(ArrayHandle<int32_t> ah){
     const int32_t * array = ah.ptr();
     int32_t size = ah.size();
-    int32_t sum = 0;
-    for(int32_t i = 0; i < size; i++){
-        sum += array[i];
-    }
-    return sum;
+    return std::accumulate(array, array + size, 0);
 }
 
 /**
@@ -211,8 +212,6 @@ AnyType newplda_gibbs_pred::run(AnyType & args)
     if(__min(counts) <= 0)
         throw std::invalid_argument(
             "Invalid values in counts.");
-    if(__min(topic_assignment) < 0 || __max(topic_assignment) >= topic_num)
-        throw std::invalid_argument("Invalid values in topics");
     if((size_t)__sum(counts) != topic_assignment.size())
         throw std::invalid_argument(
             "Dimension mismatch - sum(counts) != topic_assignment.size()");
@@ -250,6 +249,8 @@ AnyType newplda_gibbs_pred::run(AnyType & args)
         throw std::runtime_error("The args.mSysInfo->user_fctx is null.");
     }
 
+    // iteration is done within this c function to avoid the overhead by
+    // multiple UDF calls
     int32_t unique_word_count = words.size();
     for(int it = 0; it < iter_num; it++){
         int32_t word_index = 0;
@@ -347,8 +348,6 @@ AnyType newplda_gibbs_train::run(AnyType & args)
     if(__min(counts) <= 0)
         throw std::invalid_argument(
             "Invalid values in counts.");
-    if(__min(topic_assignment) < 0 || __max(topic_assignment) >= topic_num)
-        throw std::invalid_argument("Invalid values in topics");
     if((size_t)__sum(counts) != topic_assignment.size())
         throw std::invalid_argument(
             "Dimension mismatch - sum(counts) != topic_assignment.size().");
@@ -423,9 +422,6 @@ AnyType newplda_gibbs_train::run(AnyType & args)
  **/
 AnyType newplda_random_assign::run(AnyType & args)
 {
-    if(args[0].isNull() || args[1].isNull())
-        throw std::invalid_argument("Null argument.");
-
     int32_t word_count = args[0].getAs<int32_t>();
     int32_t topic_num = args[1].getAs<int32_t>();
 
@@ -445,7 +441,7 @@ AnyType newplda_random_assign::run(AnyType & args)
             INT4TI.align));
 
     for(int32_t i = 0; i < word_count; i++){
-        int32_t topic = rand() % topic_num;
+        int32_t topic = random() % topic_num;
         topic_count[topic] += 1;
         topic_assignment[i] = topic;  
     }
@@ -490,7 +486,7 @@ AnyType newplda_count_topic_sfunc::run(AnyType & args)
 
     ArrayHandle<int32_t> words = args[1].getAs<ArrayHandle<int32_t> >();
     ArrayHandle<int32_t> counts = args[2].getAs<ArrayHandle<int32_t> >();
-    ArrayHandle<int32_t> topics = args[3].getAs<ArrayHandle<int32_t> >();
+    ArrayHandle<int32_t> topic_assignment = args[3].getAs<ArrayHandle<int32_t> >();
     if(words.size() != counts.size())
         throw std::invalid_argument(
             "Dimensions mismatch - words.size() != counts.size().");
@@ -500,11 +496,11 @@ AnyType newplda_count_topic_sfunc::run(AnyType & args)
     if(__min(counts) <= 0)
         throw std::invalid_argument(
             "Invalid values in counts.");
-    if(__min(topics) < 0 || __max(topics) >= topic_num)
+    if(__min(topic_assignment) < 0 || __max(topic_assignment) >= topic_num)
         throw std::invalid_argument("Invalid values in topics");
-    if((size_t)__sum(counts) != topics.size())
+    if((size_t)__sum(counts) != topic_assignment.size())
         throw std::invalid_argument(
-            "Dimension mismatch - sum(counts) != topics.size()");
+            "Dimension mismatch - sum(counts) != topic_assignment.size()");
 
     MutableArrayHandle<int32_t> state(NULL);
     if(args[0].isNull()){
@@ -522,7 +518,7 @@ AnyType newplda_count_topic_sfunc::run(AnyType & args)
     for(int32_t i = 0; i < unique_word_count; i++){
         int32_t wordid = words[i];
         for(int32_t j = 0; j < counts[i]; j++){
-            int32_t topic = topics[word_index];
+            int32_t topic = topic_assignment[word_index];
             state[wordid * topic_num + topic]++;
             state[voc_size * topic_num + topic]++;
             word_index++;
@@ -536,21 +532,18 @@ AnyType newplda_count_topic_sfunc::run(AnyType & args)
  * @brief This function is the prefunc for the aggregator computing the
  * topic counts.
  * @param args[0]   The state variable, local topic counts
- * @param args[1]   The state variable, local word topic counts
+ * @param args[1]   The state variable, local topic counts
  * @return          The merged state, element-wise sum of two local states
  **/
 AnyType newplda_count_topic_prefunc::run(AnyType & args)
 {
-    if(args[0].isNull() || args[1].isNull())
-        throw std::invalid_argument("Null argument.");
-
     MutableArrayHandle<int32_t> state1 = args[0].getAs<MutableArrayHandle<int32_t> >();
     ArrayHandle<int32_t> state2 = args[1].getAs<ArrayHandle<int32_t> >();
 
     if(state1.size() != state2.size())
         throw std::invalid_argument("Invalid dimension.");
 
-    for(uint32_t i = 0; i < state1.size(); i++)
+    for(size_t i = 0; i < state1.size(); i++)
         state1[i] += state2[i];
     
     return state1;
@@ -574,9 +567,6 @@ AnyType newplda_first::run(AnyType & args)
 
 AnyType newplda_transpose::run(AnyType & args)
 {
-    if(args[0].isNull())
-        throw std::invalid_argument("Null argument.");
-    
     ArrayHandle<int32_t> matrix = args[0].getAs<ArrayHandle<int32_t> >();
     if(matrix.dims() != 2)
         throw std::domain_error("Invalid dimension.");
@@ -611,9 +601,6 @@ typedef struct __sr_ctx{
 
 void * newplda_unnest::SRF_init(AnyType &args) 
 {
-    if (args[0].isNull())
-        throw std::invalid_argument("Null argument.");
-
     ArrayHandle<int32_t> inarray = args[0].getAs<ArrayHandle<int32_t> >();
     if(inarray.dims() != 2)
         throw std::invalid_argument("Invalid dimension.");
