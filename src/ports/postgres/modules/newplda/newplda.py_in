@@ -1,7 +1,7 @@
 """
 @file newplda.py_in 
 
-@brief Parallel Latent Dirichlet Allocation inference using collapsed Gibbs
+@brief Latent Dirichlet Allocation inference using collapsed Gibbs
 sampling algorithm
 
 @namespace newplda
@@ -100,7 +100,8 @@ class PLDATrainer:
         plpy.execute("""
             INSERT INTO %s
             SELECT
-                gp_segment_id, docid, wordcount, words, counts, 
+                m4_ifdef(`__GREENPLUM__', `gp_segment_id', `1'), 
+                docid, wordcount, words, counts, 
                 %s.__newplda_random_assign(wordcount, %s) 
             FROM %s data
             """ % (
@@ -322,7 +323,8 @@ class PLDAPredictor:
         plpy.execute("""
             INSERT INTO %s
             SELECT 
-                gp_segment_id, docid, wordcount, words, counts,
+                m4_ifdef(`__GREENPLUM__', `gp_segment_id', `1'), 
+                docid, wordcount, words, counts,
                 %s.__newplda_random_assign(wordcount, %s) doc_topic 
             FROM %s data
             """ % (
@@ -415,15 +417,6 @@ class PLDAPredictor:
 def plda_train(
     madlib_schema, train_table, voc_size, topic_num, iter_num, alpha, beta,
     model_table, output_data_table):
-    __assert(
-        train_table is not None and
-        voc_size is not None and
-        topic_num is not None and
-        iter_num is not None and
-        alpha is not None and
-        beta is not None and
-        model_table is not None,
-        "None of parameters could be null")
 
     __assert(
         train_table != '',  
@@ -446,6 +439,9 @@ def plda_train(
     __assert(
         model_table != '',
         'The model_table should be a non-empty string')
+    __assert(
+        output_data_table != '',
+        'The output_data_table should be a non-empty string')
 
     __warn(
         voc_size <= 1e5,
@@ -476,12 +472,6 @@ def plda_train(
 """
 def plda_predict(
     madlib_schema, test_table, model_table, output_table, iter_num = 20):
-    __assert(
-        test_table is not None and
-        model_table is not None and
-        iter_num is not None and
-        output_table is not None,
-        "None of parameters except for the label could be null")
 
     __assert(
         test_table != '',  
@@ -522,12 +512,6 @@ def plda_predict(
 """
 def get_topic_desc(
     madlib_schema, model_table, vocab_table, top_k, desc_table):
-    __assert(
-        model_table is not None and
-        vocab_table is not None and
-        top_k is not None and
-        desc_table is not None,
-        'None of the parameters can be null')
 
     __assert(
         model_table != '' and
@@ -624,11 +608,6 @@ def get_topic_desc(
 """
 def get_word_topic_count(madlib_schema, model_table, output_table):
     __assert(
-        model_table is not None and
-        output_table is not None,
-        'Neither model_table nor dist_table can be null')
-
-    __assert(
         model_table != '' and
         output_table != '',
         'Neither model_table nor dist_table can be empty string')
@@ -660,11 +639,6 @@ def get_word_topic_count(madlib_schema, model_table, output_table):
 @param output_table    The output table for storing the per-topic word counts
 """
 def get_topic_word_count(madlib_schema, model_table, output_table):
-    __assert(
-        model_table is not None and
-        output_table is not None,
-        'Neither model_table nor dist_table can be null')
-
     __assert(
         model_table != '' and
         output_table != '',
@@ -699,10 +673,6 @@ def get_topic_word_count(madlib_schema, model_table, output_table):
 @return         The normalized vector
 """
 def l1_norm_with_smoothing(vector, smooth):
-    __assert(
-        vector is not None and
-        smooth is not None,
-        'neither vector nor smooth could be null')
     norm = sum(map(lambda r: abs(r), vector))
     norm += abs(smooth) * len(vector)
     return map(lambda r: float(r + abs(smooth)) / norm, vector)
@@ -852,9 +822,6 @@ def conorm_data(
 @return         The index of elements
 """
 def index_sort(vector):
-    __assert(vector is not None,
-        'The input vector is null')
-
     dim = len(vector)
     idx = range(dim)
     idx.sort(key = lambda r: vector[r])

@@ -2,7 +2,7 @@
  *
  * @file newplda.sql_in
  *
- * @brief SQL functions for parallel Latent Dirichlet Allocation
+ * @brief SQL functions for Latent Dirichlet Allocation
  * @date Dec 2012
  *
  * @sa For an introduction to Latent Dirichlet Allocation models, see the 
@@ -19,7 +19,7 @@ m4_include(`SQLCommon.m4')
 @about
 
 Latent Dirichlet Allocation (LDA) is an interesting generative probabilistic
-model for natural texts that has received a lot of attention in recent years. 
+model for natural texts and has received a lot of attention in recent years. 
 The model is quite versatile, having found uses in problems like automated 
 topic discovery, collaborative filtering, and document classification.
 
@@ -28,24 +28,24 @@ topics (e.g. a document is related to Topic 1 with probability 0.7, and Topic 2
 with probability 0.3), and that each word in the document is attributable to
 one of the document's topics. There is a (symmetric) Dirichlet prior with
 parameter \f$ \alpha \f$ on each document's topic mixture. In addition, there
-is another (symmateric) Dirichlet prior with parameter \f$ \eta \f$ on the
+is another (symmateric) Dirichlet prior with parameter \f$ \beta \f$ on the
 distribution of words for each topic.
 
 The following generative process then defines a distribution over a corpus of
 documents. 
 
-First sample, for each topic \f$ i \f$, a per-topic word
-distribution \f$ \Phi_i \f$ from the Dirichlet(\f$\eta\f$) prior. 
+First, sample for each topic \f$ i \f$, a per-topic word
+distribution \f$ \phi_i \f$ from the Dirichlet(\f$\beta\f$) prior. 
 
-Then for each document:
+Second, for each document:
 -# Sample a document length N from a suitable distribution, say, Poisson.
 -# Sample a topic mixture \f$ \theta \f$ for the document from the
-Dirichlet(\f$\alpha\f$) distribution.  -# For each of the N words:
+Dirichlet(\f$\alpha\f$) distribution.  
+-# For each of the N words:
    -# Sample a topic \f$ z_n \f$ from the multinomial topic distribution \f$
    \theta \f$.  
-   -# Sample a word \f$ w_n \f$ from the multinomial word
-   distribution \f$
-   \Phi_{z_n} \f$ associated with topic \f$ z_n \f$.
+   -# Sample a word \f$ w_n \f$ from the multinomial word distribution \f$
+   \phi_{z_n} \f$ associated with topic \f$ z_n \f$.
 
 In practice, only the words in each document are observable. The topic mixture
 of each document and the topic for each word in each document are latent
@@ -54,11 +54,10 @@ is the problem people refer to when they talk about the inference problem for
 LDA. Exact inference is intractable, but several approximate inference
 algorithms for LDA have been developed. The simple and effective Gibbs sampling
 algorithm described in Griffiths and Steyvers [2] appears to be the current
-algorithm of choice. Our parallel implementation of LDA comes from Wang et al
-[3], which is essentially a straightforward parallelisation of the Gibbs
-sampling algorithm.
+algorithm of choice.
 
-See also http://code.google.com/p/plda/.
+This implementation provides a parallel and scalable in-database solution for
+LDA based on Gibbs sampling.
 
 @input
 The \b corpus/dataset to be analyzed is expected to be of the following form:
@@ -66,26 +65,22 @@ The \b corpus/dataset to be analyzed is expected to be of the following form:
     <em>docid</em> INTEGER,
     <em>wordid</em> INTEGER,
     <em>count</em> INTEGER
-    ...
 )</pre>
 where \c docid refers to the document ID, \c wordid is the word ID (the index
 of a word in the vocabulary), and \c count is the number of occurence of the
-word in the document. Note that the wordid and count must be non-negative
-integers and it is highly recommended that the wordid ranges from 0 to \c
-voc_size - 1, where \c voc_size represents the size of vocabulary.
+word in the document. 
 
 The \b vocabulary/dictionary that indexes all the words found in the corpus is
 of the following form:
 <pre>{TABLE|VIEW} <em>vocab_table</em> (
     <em>wordid</em> INTEGER,
     <em>word</em> TEXT,
-    ...
 )</pre>
 where \c wordid refers the word ID (the index of a word in the vocabulary) and
 \c word is the actual word.
 
 @usage
-- The training (i.e. topic inference) is achieved through the following UDF
+- The training (i.e. topic inference) can be done with the following function:
     <pre>
         SELECT \ref newplda_train('<em>data_table</em>', '<em>voc_size</em>',
         '<em>topic_num</em>', '<em>iter_num</em>', <em>alpha</em>,
@@ -116,7 +111,7 @@ where \c wordid refers the word ID (the index of a word in the vocabulary) and
     </pre>
 
 - The prediction (i.e. labelling of test documents using a learned LDA model)
-  is achieved using the following UDF 
+  can be done with the following function: 
     <pre>
         SELECT \ref newplda_predict('<em>data_table</em>',
         '<em>model_table</em>', '<em>output_table</em>');
@@ -136,8 +131,8 @@ where \c wordid refers the word ID (the index of a word in the vocabulary) and
     </pre>
 
 @implementation
-The input format for the Parallel LDA module is very common in many machine
-learning packages written in various lanugages, which allows users to generate
+The input format for this module is very common in many machine learning
+packages written in various lanugages, which allows users to generate
 datasets using any existing document preprocessing tools or import existing
 dataset very conveniently. Internally, the input data will be validated and then
 converted to the following format for efficiency: 
@@ -248,7 +243,7 @@ appropriate parameters. Here is an example.
         SELECT docid, topic_count FROM my_outdata;
     \endcode
 
-    -# The per-document topic counts:
+    -# The per-document topic assignments:
     \code
         SELECT docid, words, counts, topic_assignment FROM my_outdata;
     \endcode
@@ -256,8 +251,8 @@ appropriate parameters. Here is an example.
     By scanning \c words, \c counts, and \c topic_assignment together, we can
     get the topic assignment for each word in a document.
 
--# To use a learned LDA model for prediction (i.e. to label new documents), we can use the following
-commands: 
+-# To use a learned LDA model for prediction (i.e. to label new documents), we
+can use the following commands: 
 
 \code
     SELECT MADLib.newplda_predict('my_testing', 'my_model', 'my_pred');
@@ -276,7 +271,7 @@ commands:
         SELECT docid, topic_count FROM my_pred;
     \endcode
 
-    -# The per-document topic counts:
+    -# The per-document topic assignments:
     \code
         SELECT docid, words, counts, topic_assignment FROM my_pred;
     \endcode
@@ -349,7 +344,7 @@ RETURNS SETOF MADLIB_SCHEMA.newplda_result AS $$
     )
     return [[model_table, 'model table'], 
         [output_data_table, 'output data table']]
-$$ LANGUAGE PLPYTHONU;
+$$ LANGUAGE PLPYTHONU STRICT;
 
 
 /**
@@ -375,7 +370,7 @@ RETURNS SETOF MADLIB_SCHEMA.newplda_result AS $$
     return [[
         output_table, 
         'per-doc topic distribution and per-word topic assignments']]
-$$ LANGUAGE PLPYTHONU;
+$$ LANGUAGE PLPYTHONU STRICT;
 
 /**
  * @brief This UDF computes the per-word topic counts.
@@ -392,7 +387,7 @@ RETURNS SETOF MADLIB_SCHEMA.newplda_result AS $$
     PythonFunctionBodyOnly(`newplda', `newplda')
     newplda.get_word_topic_count(schema_madlib, model_table, output_table)
     return [[output_table, 'per-word topic counts']]
-$$ LANGUAGE plpythonu;
+$$ LANGUAGE plpythonu STRICT;
 
 /**
  * @brief This UDF computes the per-topic word counts.
@@ -409,7 +404,7 @@ RETURNS SETOF MADLIB_SCHEMA.newplda_result AS $$
     PythonFunctionBodyOnly(`newplda', `newplda')
     newplda.get_topic_word_count(schema_madlib, model_table, output_table)
     return [[output_table, 'per-topic word counts']]
-$$ LANGUAGE plpythonu;
+$$ LANGUAGE plpythonu STRICT;
 
 /**
  * @brief This UDF gets the description for each topic (top-k words) 
@@ -434,7 +429,7 @@ RETURNS SETOF MADLIB_SCHEMA.newplda_result AS $$
         desc_table, 
         """topic description, use "ORDER BY topicid, prob DESC" to check the
         results"""]]
-$$ LANGUAGE plpythonu;
+$$ LANGUAGE plpythonu STRICT;
 
 /**
  * @brief This UDF checks the vocabulary and converts non-continous wordids into
@@ -453,7 +448,7 @@ RETURNS SETOF MADLIB_SCHEMA.newplda_result AS $$
     PythonFunctionBodyOnly(`newplda', `newplda')
     newplda.norm_vocab(vocab_table, output_vocab_table)
     return [[output_vocab_table,'normalized vocbulary table']]
-$$ LANGUAGE plpythonu;
+$$ LANGUAGE plpythonu STRICT;
 
 /**
  * @brief This UDF converts the data table according to the normalized
@@ -473,7 +468,7 @@ RETURNS SETOF MADLIB_SCHEMA.newplda_result AS $$
     PythonFunctionBodyOnly(`newplda', `newplda')
     newplda.norm_dataset(data_table, norm_vocab_table, output_data_table)
     return [[output_data_table,'normalized data table']]
-$$ LANGUAGE plpythonu;
+$$ LANGUAGE plpythonu STRICT;
 
 /**
  * @brief This UDF extracts the list of wordids from the data table and joins
@@ -499,7 +494,7 @@ RETURNS SETOF MADLIB_SCHEMA.newplda_result AS $$
         data_table, vocab_table, output_data_table, output_vocab_table)
     return [[output_data_table,'normalized data table'],
         [output_vocab_table,'normalized vocab table']]
-$$ LANGUAGE plpythonu;
+$$ LANGUAGE plpythonu STRICT;
 
 /**
  * @brief L1 normalization with smoothing
@@ -516,7 +511,7 @@ MADLIB_SCHEMA.newplda_util_norm_with_smoothing
 RETURNS FLOAT8[] AS $$
     PythonFunctionBodyOnly(`newplda', `newplda')
     return newplda.l1_norm_with_smoothing(arr, smooth)
-$$ LANGUAGE PLPYTHONU;
+$$ LANGUAGE PLPYTHONU STRICT;
 
 /**
  * @brief This UDF returns the index of elements in a sorted order
@@ -531,7 +526,7 @@ MADLIB_SCHEMA.newplda_util_index_sort
 RETURNS INT4[] AS $$
     PythonFunctionBodyOnly(`newplda', `newplda')
     return newplda.index_sort(arr)
-$$ LANGUAGE plpythonu;
+$$ LANGUAGE plpythonu STRICT;
 
 /**
  * @brief Transpose a 2-D array

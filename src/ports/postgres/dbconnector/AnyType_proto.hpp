@@ -43,7 +43,7 @@ public:
     inline SystemInformation * getSysInfo(){
         return this->mSysInfo;
     }
-    FunctionCallInfo getFCInfo(){
+    inline FunctionCallInfo getFCInfo(){
         return this->fcinfo;
     }
 protected:
