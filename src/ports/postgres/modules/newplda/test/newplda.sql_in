@@ -67,13 +67,9 @@ INSERT INTO plda_testing VALUES
 ---------------------------------------------------------------------------
 SELECT MADLib.newplda_train(
     'plda_training', 
-    20, 
-    5, 
-    1, 
-    5, 
-    0.01,
     'plda_model',
-    'plda_output_data');
+    'plda_output_data',
+    20, 5, 2, 10, 0.01);
 
 SELECT MADLib.newplda_predict(
     'plda_testing', 
@@ -83,28 +79,24 @@ SELECT MADLib.newplda_predict(
 SELECT MADLib.newplda_get_topic_desc(
     'plda_model', 
     'plda_vocab', 
-    5,
-    'topic_word_desc'); 
-
-SELECT MADLib.newplda_get_word_topic_count(
-    'plda_model', 
-    'word_topic_count'); 
+    'topic_word_desc',
+    5); 
 
 SELECT MADLib.newplda_get_topic_word_count(
     'plda_model', 
     'topic_word_count'); 
 
-SELECT MADLib.newplda_util_index_sort(array[1, 4, 2, 3]); 
-SELECT MADLib.newplda_util_transpose(array[[1, 2, 3],[4, 5, 6]]); 
-SELECT MADLib.newplda_util_norm_with_smoothing(array[1, 4, 2, 3], 0.1); 
+SELECT MADLib.__newplda_util_index_sort(array[1, 4, 2, 3]); 
+SELECT MADLib.__newplda_util_transpose(array[[1, 2, 3],[4, 5, 6]]); 
+SELECT MADLib.__newplda_util_norm_with_smoothing(array[1, 4, 2, 3], 0.1); 
 
 SELECT * 
-FROM MADLib.newplda_util_norm_vocab('plda_vocab', 'norm_plda_vocab');
+FROM MADLib.__newplda_util_norm_vocab('plda_vocab', 'norm_plda_vocab');
 
 SELECT * 
-FROM MADLib.newplda_util_norm_dataset('plda_testing', 'norm_plda_vocab',
+FROM MADLib.__newplda_util_norm_dataset('plda_testing', 'norm_plda_vocab',
 'norm_plda_data');
 
 SELECT * 
-FROM MADLib.newplda_util_conorm_data('plda_testing', 'plda_vocab',
+FROM MADLib.__newplda_util_conorm_data('plda_testing', 'plda_vocab',
 'norm_plda_data', 'norm_plda_vocab')
