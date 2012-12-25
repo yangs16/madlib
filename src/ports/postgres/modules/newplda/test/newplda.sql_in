@@ -86,6 +86,10 @@ SELECT MADLib.newplda_get_topic_word_count(
     'plda_model', 
     'topic_word_count'); 
 
+SELECT MADLib.newplda_get_word_topic_count(
+    'plda_model', 
+    'topic_word_count'); 
+
 SELECT MADLib.__newplda_util_index_sort(array[1, 4, 2, 3]); 
 SELECT MADLib.__newplda_util_transpose(array[[1, 2, 3],[4, 5, 6]]); 
 SELECT MADLib.__newplda_util_norm_with_smoothing(array[1, 4, 2, 3], 0.1); 
