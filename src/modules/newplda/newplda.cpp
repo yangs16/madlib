@@ -21,6 +21,9 @@ namespace modules {
 namespace newplda {
 
 using madlib::dbconnector::postgres::madlib_get_typlenbyvalalign;
+using madlib::dbconnector::postgres::madlib_construct_array;
+using madlib::dbconnector::postgres::madlib_construct_md_array;
+
 typedef struct __type_info{
     Oid oid;
     int16_t len;
@@ -388,7 +391,7 @@ AnyType newplda_random_assign::run(AnyType & args)
         throw std::invalid_argument( "Invalid argument - topic_num.");
 
     MutableArrayHandle<int32_t> doc_topic(
-        construct_array(
+        madlib_construct_array(
             NULL, topic_num + word_count, INT4TI.oid, INT4TI.len, INT4TI.byval,
             INT4TI.align));
 
@@ -456,7 +459,7 @@ AnyType newplda_count_topic_sfunc::run(AnyType & args)
     if(args[0].isNull()){
         int dims[2] = {voc_size + 1, topic_num};
         int lbs[2] = {1, 1};
-        state = construct_md_array(
+        state = madlib_construct_md_array(
             NULL, NULL, 2, dims, lbs, INT4TI.oid, INT4TI.len, INT4TI.byval,
             INT4TI.align);
     } else {
@@ -511,7 +514,7 @@ AnyType newplda_transpose::run(AnyType & args)
     int dims[2] = {col_num, row_num};
     int lbs[2] = {1, 1};
     MutableArrayHandle<int32_t> transposed(
-        construct_md_array(
+        madlib_construct_md_array(
             NULL, NULL, 2, dims, lbs, INT4TI.oid, INT4TI.len, INT4TI.byval,
             INT4TI.align));
 
@@ -557,7 +560,7 @@ AnyType newplda_unnest::SRF_next(void *user_fctx, bool *is_last_call)
     }
 
     MutableArrayHandle<int32_t> outarray(
-        construct_array(
+        madlib_construct_array(
             NULL, ctx->dim, INT4TI.oid, INT4TI.len, INT4TI.byval,
             INT4TI.align));
     memcpy(
