@@ -28,7 +28,7 @@ topics (e.g. a document is related to Topic 1 with probability 0.7, and Topic 2
 with probability 0.3), and that each word in the document is attributable to
 one of the document's topics. There is a (symmetric) Dirichlet prior with
 parameter \f$ \alpha \f$ on each document's topic mixture. In addition, there
-is another (symmateric) Dirichlet prior with parameter \f$ \beta \f$ on the
+is another (symmetric) Dirichlet prior with parameter \f$ \beta \f$ on the
 distribution of words for each topic.
 
 The following generative process then defines a distribution over a corpus of
@@ -237,7 +237,7 @@ appropriate parameters. Here is an example.
         'my_word_topic_count');
     \endcode
 
-    To get te the topic counts and the topic assignments for each doucment, we
+    To get the topic counts and the topic assignments for each doucment, we
     can run the following commands:
 
     -# The per-document topic counts:
