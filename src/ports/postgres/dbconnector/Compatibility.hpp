@@ -234,7 +234,8 @@ inline ArrayType* madlib_construct_md_array
             elems, nulls, ndims, dims, lbs, elmtype, elmlen, elmbyval,
             elmalign) :
         construct_md_array_zero(
-            ndims, dims, lbs, elmtype, elmlen, elmbyval, elmalign); }
+            ndims, dims, lbs, elmtype, elmlen, elmbyval, elmalign); 
+}
 
 inline ArrayType* madlib_construct_array
 (
