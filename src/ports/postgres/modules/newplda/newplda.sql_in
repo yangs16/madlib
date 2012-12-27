@@ -451,19 +451,14 @@ LANGUAGE C STRICT;
 
 /**
  * @brief This UDF predicts the topics of words in a document given the learned
- * topic models. The learned topic modesl are passed to this function in the
- * first call and then transfered to the rest calls through
- * fcinfo->flinfo->fn_extra. 
+ * topic models. 
  * @param words             The set of unique words in the document
  * @param counts            The counts of each unique words in the document
  *                          (sum(counts) = word_count)
  * @param doc_topic         The current per-doc topic counts and topic
  *                          assignments
  * @param model             The current model (including the per-word topic counts
- *                          and the corpus-level topic counts), not null for the
- *                          first call in each segment, but null for the rest
- *                          calls for efficiency, refer to the tricks in the
- *                          join operation in the sql calling this function
+ *                          and the corpus-level topic counts)
  * @param alpha             The Dirichlet parameter for per-document topic multinomial             
  * @param beta              The Dirichlet parameter for per-topic word multinomial
  * @param voc_size          The size of vocabulary
@@ -490,20 +485,17 @@ LANGUAGE C STRICT;
 
 /**
  * @brief This UDF learns the topics of words in a document and is the main
- * step of a Gibbs sampling iteration. The per-word topic counts and
- * corpus-level topic counts are passed to this function in the first call and
- * then transfered to the rest calls through fcinfo->flinfo->fn_extra for
- * efficiency. 
+ * step of a Gibbs sampling iteration. The model parameter (including the
+ * per-word topic counts and corpus-level topic counts) is passed to this
+ * function in the first call and then transfered to the rest calls through
+ * fcinfo->flinfo->fn_extra to allow the immediate update.
  * @param words             The set of unique words in the document
  * @param counts            The counts of each unique words in the document
  *                          (sum(counts) = word_count)
  * @param doc_topic         The current per-doc topic counts and topic
  *                          assignments
  * @param model             The current model (including the per-word topic counts
- *                          and the corpus-level topic counts), not null for the
- *                          first call in each segment, but null for the rest
- *                          calls for efficiency, refer to the tricks in the
- *                          join operation in the sql calling this function
+ *                          and the corpus-level topic counts)
  * @param alpha             The Dirichlet parameter for per-document topic multinomial             
  * @param beta              The Dirichlet parameter for per-topic word multinomial
  * @param voc_size          The size of vocabulary
