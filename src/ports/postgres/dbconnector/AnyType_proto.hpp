@@ -40,6 +40,9 @@ public:
     bool isNull() const;
     bool isComposite() const;
     AnyType& operator<<(const AnyType& inValue);
+    inline FunctionCallInfo getFCInfo(){
+        return this->fcinfo;
+    }
 
 protected:
     /**
