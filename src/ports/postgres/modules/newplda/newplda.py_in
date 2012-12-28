@@ -6,7 +6,7 @@ sampling algorithm
 
 @namespace newplda
 
-Parallel LDA: Driver and auxiliary functions
+LDA: Driver and auxiliary functions
 """
 
 import plpy
@@ -35,6 +35,7 @@ class PLDATrainer:
         plpy.execute('DROP TABLE IF EXISTS %s' % (self.work_table_0))
         plpy.execute("""
             CREATE TEMP TABLE %s(
+                distid      INT4,
                 docid       INT4, 
                 wordcount   INT4, 
                 words       INT4[], 
@@ -43,12 +44,13 @@ class PLDATrainer:
                 )
                 m4_ifdef(`__GREENPLUM__', 
                     `WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY
-                    (docid)') 
+                    (distid)') 
             """ % (self.work_table_0)) 
 
         plpy.execute('DROP TABLE IF EXISTS %s' % (self.work_table_1))
         plpy.execute("""
             CREATE TEMP TABLE %s(
+                distid      INT4,
                 docid       INT4, 
                 wordcount   INT4, 
                 words       INT4[], 
@@ -57,7 +59,7 @@ class PLDATrainer:
                 )
                 m4_ifdef(`__GREENPLUM__', 
                     `WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY
-                    (docid)') 
+                    (distid)') 
             """ % (self.work_table_1)) 
 
         plpy.execute('DROP TABLE IF EXISTS %s' % (self.model_table))
@@ -91,12 +93,13 @@ class PLDATrainer:
 
     def init_random(self):
         stime = time.time()
-        plpy.info('initializing topics randomly...')
+        plpy.info('initializing topics randomly..')
 
         plpy.execute('TRUNCATE TABLE %s' % (self.work_table_0));
         plpy.execute("""
             INSERT INTO %s
             SELECT
+                m4_ifdef(`__GREENPLUM__', `gp_segment_id', `1'),
                 docid, wordcount, words, counts, 
                 %s.__newplda_random_assign(wordcount, %s) 
             FROM %s data
@@ -110,7 +113,7 @@ class PLDATrainer:
 
     def gen_model(self):
         stime = time.time()
-        plpy.info('\t\tgenerating models...')
+        plpy.info('\t\tgenerating models..')
 
         work_table_final = self.work_table_1
         if self.iter_num % 2 == 0:
@@ -136,7 +139,7 @@ class PLDATrainer:
 
     def gen_output_data_table(self):
         stime = time.time()
-        plpy.info('\t\tgenerating output data table...')
+        plpy.info('\t\tgenerating output data table..')
 
         work_table_final = self.work_table_1
         if self.iter_num % 2 == 0:
@@ -167,32 +170,54 @@ class PLDATrainer:
         if it % 2 == 0 :
             work_table_out = self.work_table_0
 
-        plpy.info('iteration [%d]....' % (it))
-        plpy.info('\t\tjoining & sampling ...')
+        plpy.info('iteration [%d]...' % (it))
+        plpy.info('\t\tjoining & sampling ..')
         plpy.execute('TRUNCATE TABLE %s' % (work_table_out))
         plpy.execute("""
             INSERT INTO %s
             SELECT  
-                docid, wordcount, words, counts,  
-                %s.__newplda_gibbs_train(
-                    words, counts, doc_topic, model, %f, %f, %d, %d)
-            FROM (
-                SELECT 
-                    dcz.docid, dcz.wordcount, dcz.words, dcz.counts,
-                    dcz.doc_topic, model.model FROM
+                distid, docid, wordcount, words, counts,  
+                %s.__newplda_gibbs_sample_wfunc(
+                    words, counts, doc_topic, model, %f, %f, %d, %d, 1)
+                OVER (PARTITION BY distid ORDER BY docid ROWS UNBOUNDED PRECEDING)
+            FROM
+            (
+                SELECT
+                    dcz.distid, dcz.docid, dcz.wordcount, dcz.words,
+                    dcz.counts, dcz.doc_topic, chunk.model 
+                FROM
                 (
                     SELECT
-                        %s.__newplda_count_topic_agg(words, counts,
-                        doc_topic[%d:array_upper(doc_topic, 1)], %d, %d) model
-                    FROM %s dcz 
-                ) model,
-                %s dcz
+                        distid, docid, model
+                    FROM
+                    (
+                        SELECT
+                            %s.__newplda_count_topic_agg(
+                                words, counts,
+                                doc_topic[%d:array_upper(doc_topic, 1)], %d, %d) model 
+                        FROM %s dcz 
+                    ) t1,
+                    (
+                        SELECT
+                            distid, docid
+                        FROM
+                        (
+                            SELECT
+                                distid, first_value(docid) OVER (PARTITION BY
+                                distid ORDER BY docid ROWS UNBOUNDED PRECEDING) docid
+                            FROM %s dcz
+                        ) t2
+                        GROUP BY distid, docid
+                    ) t3
+                )chunk 
+                RIGHT JOIN %s dcz
+                ON (dcz.distid = chunk.distid AND dcz.docid = chunk.docid)
             ) jd
             """ % (
                 work_table_out, self.madlib_schema, self.alpha, self.beta,
                 self.voc_size, self.topic_num, self.madlib_schema,
                 self.topic_num + 1, self.voc_size, self.topic_num,
-                work_table_in, work_table_in)
+                work_table_in, work_table_in, work_table_in)
             )
 
         etime = time.time()
@@ -200,7 +225,7 @@ class PLDATrainer:
 
     def run(self):
         stime = time.time()
-        plpy.info('start training process...')
+        plpy.info('start training process..')
 
         self.init_random()
         for it in range(1, self.iter_num + 1):
@@ -239,6 +264,7 @@ class PLDAPredictor:
         plpy.execute('DROP TABLE IF EXISTS %s' % (self.work_table_0)) 
         plpy.execute("""
             CREATE TEMP TABLE %s(
+                distid      INT4,
                 docid       INT4, 
                 wordcount   INT4, 
                 words       INT4[], 
@@ -247,12 +273,13 @@ class PLDAPredictor:
                 )
                 m4_ifdef(`__GREENPLUM__', 
                     `WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY
-                    (docid)') 
+                    (distid)') 
             """ % (self.work_table_0)) 
 
         plpy.execute('DROP TABLE IF EXISTS %s' % (self.work_table_1))
         plpy.execute("""
             CREATE TEMP TABLE %s(
+                distid      INT4,
                 docid       INT4, 
                 wordcount   INT4, 
                 words       INT4[], 
@@ -261,7 +288,7 @@ class PLDAPredictor:
                 )
                 m4_ifdef(`__GREENPLUM__', 
                     `WITH (APPENDONLY=TRUE,COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY
-                    (docid)') 
+                    (distid)') 
             """ % (self.work_table_1)) 
 
         plpy.execute('DROP TABLE IF EXISTS %s' % self.doc_topic)
@@ -281,12 +308,13 @@ class PLDAPredictor:
 
     def init_random(self):
         stime = time.time()
-        plpy.info('initializing topics randomly...')
+        plpy.info('initializing topics randomly..')
 
         plpy.execute('TRUNCATE TABLE %s' % (self.work_table_0));
         plpy.execute("""
             INSERT INTO %s
             SELECT 
+                m4_ifdef(`__GREENPLUM__', `gp_segment_id', `1'),
                 docid, wordcount, words, counts,
                 %s.__newplda_random_assign(wordcount, %s) doc_topic 
             FROM %s data
@@ -312,35 +340,51 @@ class PLDAPredictor:
 
     def infer(self):  
         stime = time.time()
-        plpy.info('infering...')
+        plpy.info('infering..')
 
         plpy.execute("""
             INSERT INTO %s
             SELECT  
-                docid, wordcount, words, counts,
-                %s.__newplda_gibbs_pred(
+                distid, docid, wordcount, words, counts,
+                %s.__newplda_gibbs_sample_wfunc(
                     words, counts, doc_topic, model, %f, %f, %d, %d, %d)
+                OVER (PARTITION BY distid ORDER BY docid ROWS UNBOUNDED PRECEDING)
             FROM
             (
                 SELECT 
-                    dcz.docid, dcz.wordcount, dcz.words, dcz.counts,
-                    dcz.doc_topic, model.model
+                    dcz.distid, dcz.docid, dcz.wordcount, dcz.words, dcz.counts,
+                    dcz.doc_topic, model
                 FROM
-                    %s model,
-                    %s dcz
+                (
+                    SELECT 
+                        distid, docid, model
+                    FROM
+                    (
+                        SELECT
+                            distid, docid
+                        FROM
+                        (
+                            SELECT
+                                distid, first_value(docid) OVER (PARTITION BY
+                                distid ORDER BY docid ROWS UNBOUNDED PRECEDING) docid
+                            FROM %s dcz
+                        ) t1
+                        GROUP BY distid, docid
+                    ) t2, %s model
+                ) chunk RIGHT JOIN %s dcz ON (dcz.distid = chunk.distid AND
+                dcz.docid = chunk.docid)
             ) jd
             """ % (
-                self.work_table_1, self.madlib_schema,
-                self.alpha, self.beta, self.voc_size, self.topic_num,
-                self.iter_num, self.model_table,
-                self.work_table_0))
+                self.work_table_1, self.madlib_schema, self.alpha, self.beta,
+                self.voc_size, self.topic_num, self.iter_num,
+                self.work_table_0, self.model_table, self.work_table_0))
 
         etime = time.time()
         plpy.info('\t\ttime elapsed: %.2f seconds' % (etime - stime))
 
     def run(self):
         stime = time.time()
-        plpy.info('start prediction process...')
+        plpy.info('start prediction process..')
 
         self.init_random()
         self.infer()
@@ -367,41 +411,37 @@ def plda_train(
 
     __assert(
         train_table != '',  
-        'Invalid argument:  Non-empty string expected for train_table.')
+        'invalid argument:  Non-empty string expected for train_table')
     __assert(
         model_table != '',
-        'Invalid argument:  Non-empty string expected for model_table.')
+        'invalid argument:  Non-empty string expected for model_table')
     __assert(
         output_data_table != '',
-        'Invalid argument:  Non-empty string expected for output_data_table.')
+        'invalid argument:  Non-empty string expected for output_data_table')
     __assert(
         voc_size > 0, 
-        'Invalid argument: Positive integer expected for voc_size.')
+        'invalid argument: Positive integer expected for voc_size')
     __assert(
         topic_num > 0, 
-        'Invalid argument: Positive integer expected for topic_num.')
+        'invalid argument: Positive integer expected for topic_num')
     __assert(
         iter_num >= 0,
-        'Invalid argument: Positive integer expected for iter_num.')
+        'invalid argument: Positive integer expected for iter_num')
     __assert(
         alpha > 0, 
-        'Invalid argument: Positive real expected for alpha.')
+        'invalid argument: Positive real expected for alpha')
     __assert(
         beta > 0, 
-        'Invalid argument: Positive real expected for beta.')
+        'invalid argument: Positive real expected for beta')
 
     __warn(
         voc_size <= 1e5,
-        """
-            The voc_size is very large: %d - make sure that the system has
-            enough memory or reduce the vocabulary size.
-        """ % (voc_size))
+        """the voc_size is very large: %d - make sure that the system has
+        enough memory or reduce the vocabulary size""" % (voc_size))
     __warn(
         topic_num <= 1e3,
-        """
-            The topic_num is large: %d - make sure that the system has enough
-            memory or reduce the topic number.
-        """% (topic_num))
+        """the topic_num is large: %d - make sure that the system has enough
+        memory or reduce the topic number"""% (topic_num))
 
     __validate_data_table(train_table, voc_size)
     convt_table = __convert_data_table(madlib_schema, train_table)
@@ -422,22 +462,20 @@ def plda_predict(
 
     __assert(
         test_table != '',  
-        'Invalid argument:  Non-empty string expected for test_table.')
+        'invalid argument:  Non-empty string expected for test_table')
     __assert(
         model_table != '', 
-        'Invalid argument:  Non-empty string expected for model_table.')
+        'invalid argument:  Non-empty string expected for model_table')
     __assert(
         output_data_table != '',
-        'Invalid argument:  Non-empty string expected for output_data_table.')
+        'invalid argument:  Non-empty string expected for output_data_table')
     __assert(
         iter_num >= 0, 
-        'Invalid argument: Positive integer expected for iter_num.')
+        'invalid argument: Positive integer expected for iter_num')
     __warn(
         iter_num <= 20,
-        """
-            The iter_num is large: %d - a smaller iter_num (e.g. 20)
-            should be good enough
-        """ % (iter_num))
+        """the iter_num is large: %d - a smaller iter_num (e.g. 20) should be
+        good enough""" % (iter_num))
 
     __check_model_table(model_table)
     rv = plpy.execute('SELECT voc_size FROM %s' % (model_table))
@@ -448,7 +486,6 @@ def plda_predict(
     pp = PLDAPredictor(
         madlib_schema, convt_table, model_table, output_data_table, iter_num) 
     pp.run()
-    
 
 """
 @brief Get the per-topic description by top-k words
@@ -463,11 +500,11 @@ def get_topic_desc(
         model_table != '' and
         vocab_table != '' and
         desc_table != '',
-        'Invalid argument:  Non-empty string expected for table names.')
+        'invalid argument:  Non-empty string expected for table names')
 
     __assert(
         top_k > 0,
-        'Invalid argument: Positive integer expected for top_k.')
+        'invalid argument: Positive integer expected for top_k')
 
     __check_model_table(model_table) 
     __check_vocab_table(vocab_table)
@@ -556,7 +593,7 @@ def get_topic_word_count(madlib_schema, model_table, output_table):
     __assert(
         model_table != '' and
         output_table != '',
-        'Invalid argument:  Non-empty string expected for table names.')
+        'invalid argument:  Non-empty string expected for table names')
 
     __check_model_table(model_table) 
 
@@ -589,7 +626,7 @@ def get_word_topic_count(madlib_schema, model_table, output_table):
     __assert(
         model_table != '' and
         output_table != '',
-        'Invalid argument:  Non-empty string expected for table names.')
+        'invalid argument: non-empty string expected for table names')
 
     __check_model_table(model_table) 
 
@@ -781,6 +818,7 @@ wordcount, words, counts>.
 @param return       The converted table name
 """
 def __convert_data_table(madlib_schema, data_table):
+    plpy.info('converting the data table ...')
     convt_table = '__newplda_convt_corpus__'
     plpy.execute('DROP TABLE IF EXISTS %s' % (convt_table))
     plpy.execute("""
@@ -832,6 +870,7 @@ def __warn(condition, msg):
 @param data_table   The data table name
 """
 def __check_data_table(data_table):
+    plpy.info('checking the data table ... ')
     try:
         rv = plpy.execute("""
             SELECT count(*) cnt FROM pg_attribute 
@@ -843,12 +882,12 @@ def __check_data_table(data_table):
             """ % (data_table))
         __assert(
            rv[0]['cnt'] == 3, 
-           """The %s shoudl have docid::INT4, wordid::INT4, count::INT4
-           columns. """ % (data_table))
+           """the %s shoudl have docid::INT4, wordid::INT4, count::INT4
+           columns""" % (data_table))
     except:
         __assert(0,
-           """The %s must exist and should have docid, wordid, and count
-           columns.""" % (data_table))
+           """the %s must exist and should have docid, wordid, and count
+           columns""" % (data_table))
 
 """
 @brief Check the validity of the data table
@@ -856,22 +895,19 @@ def __check_data_table(data_table):
 @param voc_size     The size of vocabulary
 """
 def __validate_data_table(data_table, voc_size):
+    plpy.info('validating the data table ...')
     __check_data_table(data_table)
     rv = plpy.execute('SELECT count(*) cnt FROM %s WHERE docid < 0' % (data_table))
     __warn(
         rv[0]['cnt'] == 0,
-        """
-            %d rows have negative docid - although not required, it would be
-            better to use continous non-negative integers for docid.
-        """ % (rv[0]['cnt']))
+        """%d rows have negative docid - use continous non-negative
+        integers for docid for better interpretation""" % (rv[0]['cnt']))
 
     rv = plpy.execute('SELECT count(*) cnt FROM %s WHERE wordid < 0' % (data_table))
     __assert(
         rv[0]['cnt'] == 0,
-        """
-            %d rows have negative wordid - the wordid must range from 0 to
-            voc_size - 1. 
-        """ % (rv[0]['cnt'] == 0))
+        """%d rows have negative wordid - the wordid must range from 0 to
+        voc_size - 1""" % (rv[0]['cnt'] == 0))
 
     rv = plpy.execute("""
         SELECT 
@@ -887,45 +923,39 @@ def __validate_data_table(data_table, voc_size):
         """ % (data_table))
     __assert(
         rv[0]['size'] <= voc_size,
-        """
-            The actual size of vocabulary %d is larger than the specified %d -
-            set the correct voc_size and try again.
-        """ % (rv[0]['size'], voc_size))
+        """the actual size of vocabulary %d is larger than the specified %d -
+        set the correct voc_size and try again""" % (rv[0]['size'], voc_size))
     __assert(
         rv[0]['min_wordid'] <= voc_size - 1 and
         rv[0]['max_wordid'] <= voc_size - 1,
-        'The wordid should be in the range of 0 to %d.' % (voc_size - 1))
+        """the wordid should be in the range of 0 to %d""" % (voc_size - 1))
     __warn(
         rv[0]['size'] == voc_size,
-        """
-            The actual size of vocabulary %d is little than the specified %d -
-            the vocabulary and dataset normalization is highly recommended for
-            memory efficiency. 
-        """ % (rv[0]['size'], voc_size))
+        """the actual size of vocabulary %d is little than the specified %d -
+        the vocabulary and dataset normalization is highly recommended for
+        memory efficiency""" % (rv[0]['size'], voc_size))
     __warn(
         rv[0]['min_wordid'] == 0,
-        """
-            The actual min wordid is large than 0 - the vocabulary and dataset
-            normalization is highly recommended for memory efficiency.
-        """)
+        """the actual min wordid is large than 0 - the vocabulary and dataset
+        normalization is highly recommended for memory efficiency""")
     __warn(
         rv[0]['max_wordid'] == voc_size - 1,
-        """
-            The actual max wordid is smaller than the specified (voc_size - 1 =
-            %d) - set the voc_size to %d for memory efficiency.
-        """ % (voc_size - 1, rv[0]['max_wordid'] + 1))
+        """the actual max wordid is smaller than the specified (voc_size - 1 =
+        %d) - set the voc_size to %d for memory efficiency""" % (voc_size - 1,
+        rv[0]['max_wordid'] + 1))
 
     rv = plpy.execute('SELECT count(*) cnt FROM %s WHERE count <= 0' % (data_table))
     __assert(
         rv[0]['cnt'] == 0,
         """%d rows have zero or negative count - the value in the count column
-        must be positive integers.""" % (rv[0]['cnt'] == 0))
+        must be positive integers""" % (rv[0]['cnt'] == 0))
 
 """
 @brief Check the validity of the vocabulary table
 @param vocab_table   The vocabulary table name
 """
 def __check_vocab_table(vocab_table):
+    plpy.info('checking the vocabulary table ...')
     try:
         rv = plpy.execute("""
             SELECT count(*) cnt FROM pg_attribute 
@@ -936,17 +966,18 @@ def __check_vocab_table(vocab_table):
             """ % (vocab_table))
         __assert(
            rv[0]['cnt'] == 2, 
-           'The %s should have wordid::INT4, word::TEXT columns. ' % (vocab_table))
+           """the %s should have wordid::INT4, word::TEXT columns""" % (vocab_table))
     except:
         __assert(0,
-            """The %s must exist and should have wordid and word columnes.
-            """ % (vocab_table))
+            """the %s must exist and should have wordid and word columnes""" %
+            (vocab_table))
 
 """
 @brief Check the validity of the normalized vocabulary table
 @param vocab_table   The normalized vocabulary table name
 """
 def __check_norm_vocab_table(vocab_table):
+    plpy.info('checking the normalized vocabulary table ...')
     try:
         rv = plpy.execute("""
             SELECT count(*) cnt FROM pg_attribute 
@@ -958,18 +989,19 @@ def __check_norm_vocab_table(vocab_table):
             """ % (vocab_table))
         __assert(
             rv[0]['cnt'] == 3, 
-            """The %s should have wordid, old_wordid, and word columns.
-            """ % (vocab_table))
+            """the %s should have wordid, old_wordid, and word columns""" %
+            (vocab_table))
     except:
         __assert(0,
-           """The %s must exist and should have wordid, old_wordid, and word
-           columns.""" % (vocab_table))
+           """the %s must exist and should have wordid, old_wordid, and word
+           columns""" % (vocab_table))
 
 """
 @brief Check the validity of the model table
 @param model_table  Model table name
 """
 def __check_model_table(model_table):
+    plpy.info('checking the model table ...')
     try:
         rv = plpy.execute("""
             SELECT count(*) cnt 
@@ -984,14 +1016,12 @@ def __check_model_table(model_table):
            """ % (model_table))
         __assert(
             rv[0]['cnt'] == 5, 
-            """
-                The %s must have voc_size::INT4, topic_num::INT4, alpha::FLOAT8, beta::FLOAT8,
-                and model::INT4[] columns. 
-            """ % (model_table))
+            """the %s must have voc_size::INT4, topic_num::INT4, alpha::FLOAT8,
+            beta::FLOAT8, and model::INT4[] columns""" % (model_table))
     except:
         __assert(0,
-            """The %s must exist and should have voc_size, topic_num, alpha,
-            beta, word_topic, and corpus_topic columns.""" % (model_table))
+            """the %s must exist and should have voc_size, topic_num, alpha,
+            beta, word_topic, and corpus_topic columns""" % (model_table))
 
     rv = plpy.execute("""
         SELECT voc_size, topic_num, alpha, beta, 
@@ -1001,25 +1031,27 @@ def __check_model_table(model_table):
         """ % (model_table))
     __assert(
         len(rv) > 0, 
-        'The %s should not be empty.' % (model_table))
+        'the %s should not be empty' % (model_table))
     __assert(
         len(rv) == 1, 
-        'The %s should have only 1 row.' % (model_table))
+        'the %s should have only 1 row' % (model_table))
     __assert(
         rv[0]['voc_size'] > 0, 
-        'The voc_size in %s should be a positive integer.' % (model_table))
+        'the voc_size in %s should be a positive integer' % (model_table))
     __assert(
         rv[0]['topic_num'] > 0, 
-        'The topic_num in %s should be a positive integer.' % (model_table))
+        'the topic_num in %s should be a positive integer' % (model_table))
     __assert(
         rv[0]['alpha'] > 0, 
-        'The alpha in %s should be a positive real number.' % (model_table))
+        'the alpha in %s should be a positive real number' % (model_table))
     __assert(
         rv[0]['beta'] > 0, 
-        'The beta in %s should be a positive real number.' % (model_table))
+        'the beta in %s should be a positive real number' % (model_table))
     __assert(
         rv[0]['model_size'] == (rv[0]['voc_size'] + 1) * rv[0]['topic_num'], 
-        'The model_size mismatchs with voc_size and topic_num in %s.' % (model_table))
+        """the model_size mismatchs with voc_size and topic_num in %s""" %
+        (model_table)) 
     __assert(
         rv[0]['count_size'] == rv[0]['topic_num'], 
-        'The size of topic counts mismatchs with the topic_num in %s.' % (model_table))
+        """the size of topic counts mismatchs with the topic_num in %s""" %
+        (model_table))
