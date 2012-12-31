@@ -7,8 +7,7 @@
  *//* ----------------------------------------------------------------------- */
 
 DECLARE_UDF(newplda, newplda_random_assign)
-DECLARE_UDF(newplda, newplda_gibbs_train)
-DECLARE_UDF(newplda, newplda_gibbs_pred)
+DECLARE_UDF(newplda, newplda_gibbs_sample)
 
 DECLARE_UDF(newplda, newplda_count_topic_sfunc)
 DECLARE_UDF(newplda, newplda_count_topic_prefunc)

@@ -450,45 +450,7 @@ AS 'MODULE_PATHNAME', 'newplda_random_assign'
 LANGUAGE C STRICT;
 
 /**
- * @brief This UDF predicts the topics of words in a document given the learned
- * topic models. 
- * @param words             The set of unique words in the document
- * @param counts            The counts of each unique words in the document
- *                          (sum(counts) = word_count)
- * @param doc_topic         The current per-doc topic counts and topic
- *                          assignments
- * @param model             The current model (including the per-word topic counts
- *                          and the corpus-level topic counts)
- * @param alpha             The Dirichlet parameter for per-document topic multinomial             
- * @param beta              The Dirichlet parameter for per-topic word multinomial
- * @param voc_size          The size of vocabulary
- * @param topic_num         The number of topics
- * @param iter_num          The number of iterations (20 should be enough)
- * @return                  The predicted topic counts and topic assignments
- **/
-CREATE OR REPLACE FUNCTION
-MADLIB_SCHEMA.__newplda_gibbs_pred
-(
-    words       INT4[], 
-    counts      INT4[], 
-    doc_topic   INT4[],
-    model       INT4[], 
-    alpha       FLOAT8, 
-    beta        FLOAT8,
-    voc_size    INT4, 
-    topic_num   INT4, 
-    iter_num    INT4
-)
-RETURNS INT4[]
-AS 'MODULE_PATHNAME', 'newplda_gibbs_pred'
-LANGUAGE C STRICT;
-
-/**
- * @brief This UDF learns the topics of words in a document and is the main
- * step of a Gibbs sampling iteration. The model parameter (including the
- * per-word topic counts and corpus-level topic counts) is passed to this
- * function in the first call and then transfered to the rest calls through
- * fcinfo->flinfo->fn_extra to allow the immediate update.
+ * @param state             The dummy state variable
  * @param words             The set of unique words in the document
  * @param counts            The counts of each unique words in the document
  *                          (sum(counts) = word_count)
@@ -503,8 +465,9 @@ LANGUAGE C STRICT;
  * @return                  The learned topic counts and topic assignments 
  **/
 CREATE OR REPLACE FUNCTION
-MADLIB_SCHEMA.__newplda_gibbs_train
+MADLIB_SCHEMA.__newplda_gibbs_sample
 (
+    state       INT[],  -- only to meet the definition of wfunc  
     words       INT4[], 
     counts      INT4[],
     doc_topic   INT4[],
@@ -512,11 +475,58 @@ MADLIB_SCHEMA.__newplda_gibbs_train
     alpha       FLOAT8, 
     beta        FLOAT8, 
     voc_size    INT4, 
-    topic_num   INT4 
+    topic_num   INT4, 
+    iter_num    INT4
 )
 RETURNS INT4[]
-AS 'MODULE_PATHNAME', 'newplda_gibbs_train'
-LANGUAGE C STRICT;
+AS 'MODULE_PATHNAME', 'newplda_gibbs_sample'
+LANGUAGE C;
+
+/**
+ * @breif This UDA provides a dummy window function. What we need here is only
+ * the PARTITION BY and ORDER BY mechanism of the window function. As a full
+ * join of the work table and the model table will generate a huge amount of
+ * data, which will make the following processing very slow, and the model data
+ * in all the joined records except for the first one are redundant, we design
+ * a special way to carefully join the model table with only one record in the
+ * work table in each segment. However, the databases cannot guaranteer the
+ * order a record returns in a table scan, we need to explicitly specify an
+ * order to ensure that the joined record is returned as the first record in
+ * the following table scan. In this way, the model parameter is passed to the
+ * function in the first call and is then transfered to the rest of calls
+ * through args.mSysInfo->user_fctx. The PARTITION BY and ORDER BY mechanism of
+ * the window function can exactly meet our requirement here.
+ **/
+DROP AGGREGATE IF EXISTS
+MADLIB_SCHEMA.__newplda_gibbs_sample_wfunc
+(
+    INT4[],
+    INT4[],
+    INT4[],
+    INT4[],
+    FLOAT8,
+    FLOAT8,
+    INT4,
+    INT4,
+    INT4
+);
+CREATE AGGREGATE
+MADLIB_SCHEMA.__newplda_gibbs_sample_wfunc
+(
+    INT4[],
+    INT4[],
+    INT4[],
+    INT4[],
+    FLOAT8,
+    FLOAT8,
+    INT4,
+    INT4,
+    INT4
+)
+(
+    stype = INT4[],
+    sfunc = MADLIB_SCHEMA.__newplda_gibbs_sample
+);
 
 /**
  * @brief This UDF is the sfunc for the aggregator computing the topic counts
