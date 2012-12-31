@@ -177,9 +177,8 @@ class PLDATrainer:
             INSERT INTO %s
             SELECT  
                 distid, docid, wordcount, words, counts,  
-                %s.__newplda_gibbs_sample_wfunc(
+                %s.__newplda_gibbs_sample(
                     words, counts, doc_topic, model, %f, %f, %d, %d, 1)
-                OVER (PARTITION BY distid ORDER BY docid ROWS UNBOUNDED PRECEDING)
             FROM
             (
                 SELECT
@@ -198,20 +197,15 @@ class PLDATrainer:
                         FROM %s dcz 
                     ) t1,
                     (
-                        SELECT
-                            distid, docid
-                        FROM
-                        (
-                            SELECT
-                                distid, first_value(docid) OVER (PARTITION BY
-                                distid ORDER BY docid ROWS UNBOUNDED PRECEDING) docid
-                            FROM %s dcz
-                        ) t2
-                        GROUP BY distid, docid
-                    ) t3
+                       SELECT
+                           distid, min(docid) docid 
+                       FROM %s dcz
+                       GROUP BY distid
+                    ) t2
                 )chunk 
                 RIGHT JOIN %s dcz
                 ON (dcz.distid = chunk.distid AND dcz.docid = chunk.docid)
+                ORDER BY distid, docid
             ) jd
             """ % (
                 work_table_out, self.madlib_schema, self.alpha, self.beta,
@@ -346,9 +340,8 @@ class PLDAPredictor:
             INSERT INTO %s
             SELECT  
                 distid, docid, wordcount, words, counts,
-                %s.__newplda_gibbs_sample_wfunc(
+                %s.__newplda_gibbs_sample(
                     words, counts, doc_topic, model, %f, %f, %d, %d, %d)
-                OVER (PARTITION BY distid ORDER BY docid ROWS UNBOUNDED PRECEDING)
             FROM
             (
                 SELECT 
@@ -360,19 +353,14 @@ class PLDAPredictor:
                         distid, docid, model
                     FROM
                     (
-                        SELECT
-                            distid, docid
-                        FROM
-                        (
-                            SELECT
-                                distid, first_value(docid) OVER (PARTITION BY
-                                distid ORDER BY docid ROWS UNBOUNDED PRECEDING) docid
-                            FROM %s dcz
-                        ) t1
-                        GROUP BY distid, docid
-                    ) t2, %s model
+                       SELECT
+                           distid, min(docid) docid
+                       FROM %s dcz
+                       GROUP BY distid
+                    ) t1, %s model
                 ) chunk RIGHT JOIN %s dcz ON (dcz.distid = chunk.distid AND
                 dcz.docid = chunk.docid)
+                ORDER BY distid, docid
             ) jd
             """ % (
                 self.work_table_1, self.madlib_schema, self.alpha, self.beta,
