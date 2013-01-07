@@ -126,7 +126,8 @@ class PLDATrainer:
                 %d, %d, %f, %f, 
                 %s.__newplda_count_topic_agg(
                     words, counts, doc_topic[%d:array_upper(doc_topic, 1)], %d,
-                    %d) model FROM
+                    %d) model 
+            FROM
                 %s 
             """ % (
                 self.model_table, self.voc_size, self.topic_num, self.alpha,

@@ -321,7 +321,8 @@ AnyType newplda_count_topic_sfunc::run(AnyType & args)
             "this function should be called in an aggregator");
 
     if(args[4].isNull() || args[5].isNull())
-        throw std::invalid_argument("null input");
+        throw std::invalid_argument("null parameter - voc_size and/or \
+        topic_num is null");
 
     if(args[1].isNull() || args[2].isNull() || args[3].isNull()) 
         return args[0];
