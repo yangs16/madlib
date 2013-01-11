@@ -970,9 +970,11 @@ def main(argv):
         if __get_rev_num(dbrev) != __get_rev_num(rev):
             __print_revs(rev, dbrev, con_args, schema)
             __info("Versions do not match. Install-check stopped.", True)
-            return
+            #return
 
         # Create install-check user
+        test_user = 'yangs16'
+        """
         test_user = 'madlib_' + rev.replace('.','') + '_installcheck'
         try:
             __run_sql_query("DROP USER IF EXISTS %s;" % (test_user), False)
@@ -980,12 +982,15 @@ def main(argv):
             __run_sql_query("DROP OWNED BY %s CASCADE;" % (test_user), True)
             __run_sql_query("DROP USER IF EXISTS %s;" % (test_user), True)            
         __run_sql_query("CREATE USER %s;" % (test_user), True)
+        """
         # TO DO:
         # Change ALL to USAGE in the below GRANT command
         # and fix the failing modules which still write to MADLIB schema.
+        """
         __run_sql_query("GRANT ALL ON SCHEMA %s TO %s;" 
                         % (schema, test_user), True)
-         
+        """
+
         # 2) Run test SQLs 
         __info("> Running test scripts for:", verbose)   
         
@@ -1024,9 +1029,10 @@ def main(argv):
             test_schema = "madlib_installcheck_%s" % (module)
             __run_sql_query("DROP SCHEMA IF EXISTS %s CASCADE; CREATE SCHEMA %s;" 
                             % (test_schema, test_schema), True)
+            """
             __run_sql_query("GRANT ALL ON SCHEMA %s TO %s;" 
                             % (test_schema, test_user), True)
-
+            """
             # Switch to test user and prepare the search_path
             pre_sql = '-- Switch to test user:\n' \
                       'SET ROLE %s;\n' \
@@ -1077,9 +1083,10 @@ def main(argv):
             __run_sql_query( "DROP SCHEMA IF EXISTS %s CASCADE;" % (test_schema), True)
 
         # Drop install-check user
+        """
         __run_sql_query( "DROP OWNED BY %s CASCADE;" % (test_user), True)
         __run_sql_query( "DROP USER %s;" % (test_user), True)
-            
+        """    
     
 ## # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 # Start Here

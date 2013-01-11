@@ -20,7 +20,8 @@ modules:
     - name: kernel_machines
       depends: ['svec']
     - name: linalg
-    - name: plda
+#    - name: plda
+    - name: newplda
     - name: prob
     - name: quantile
     - name: regress

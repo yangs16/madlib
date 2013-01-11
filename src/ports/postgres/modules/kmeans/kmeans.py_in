@@ -74,7 +74,8 @@ class IterationController:
             self.runSQL("""
                 DROP TABLE IF EXISTS {rel_state};
                 CREATE {temp} TABLE {unualified_rel_state} (
-                    _iteration INTEGER PRIMARY KEY,
+                    --_iteration INTEGER PRIMARY KEY,
+                    _iteration INTEGER,
                     _state {stateType}
                 );
                 """.format(
@@ -178,9 +179,23 @@ class IterationController:
                 **self.kwargs))
         if self.truncAfterIteration:
             self.runSQL("""
-                DELETE FROM {rel_state} AS _state
-                WHERE _state._iteration < {iteration}
+                DROP TABLE IF EXISTS __kmeans_most_recent_state__
+                """.format(**self.kwargs))
+            self.runSQL("""
+                CREATE TEMP TABLE __kmeans_most_recent_state__ AS SELECT * FROM
+                {rel_state} AS _state
+                WHERE _state._iteration = {iteration}
                 """.format(iteration = self.iteration, **self.kwargs))
+            self.runSQL("""
+                TRUNCATE TABLE {rel_state}
+                """.format(**self.kwargs))
+            self.runSQL("""
+                INSERT INTO {rel_state} SELECT * FROM __kmeans_most_recent_state__
+                """.format(**self.kwargs))
+            #self.runSQL("""
+            #    DELETE FROM {rel_state} AS _state
+            #    WHERE _state._iteration < {iteration}
+            #    """.format(iteration = self.iteration, **self.kwargs))
 
 def compute_kmeanspp_seeding(schema_madlib, rel_args, rel_state, rel_source,
     expr_point, **kwargs):

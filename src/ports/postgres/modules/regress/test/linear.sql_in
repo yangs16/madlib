@@ -11,8 +11,8 @@ CREATE TABLE weibull (
     id INTEGER NOT NULL,
     x1 DOUBLE PRECISION,
     x2 DOUBLE PRECISION,
-    y DOUBLE PRECISION,
-    CONSTRAINT pk_weibull PRIMARY KEY (id)
+    y DOUBLE PRECISION
+    --CONSTRAINT pk_weibull PRIMARY KEY (id)
 );
 
 /*
@@ -58,8 +58,8 @@ CREATE TABLE unm (
     id INTEGER NOT NULL,
     x1 DOUBLE PRECISION,
     x2 DOUBLE PRECISION,
-    y DOUBLE PRECISION,
-    CONSTRAINT pk_unm PRIMARY KEY (id)
+    y DOUBLE PRECISION
+    --CONSTRAINT pk_unm PRIMARY KEY (id)
 );
 
 INSERT INTO unm(id, x1, x2, y) VALUES
@@ -90,8 +90,8 @@ CREATE TABLE houses (
     bath REAL,
     price INTEGER,
     size INTEGER,
-    lot INTEGER,
-    CONSTRAINT pk_houses PRIMARY KEY (id)
+    lot INTEGER
+    --CONSTRAINT pk_houses PRIMARY KEY (id)
 );
 
 INSERT INTO houses(tax, bedroom, bath, price, size, lot) VALUES

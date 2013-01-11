@@ -11,8 +11,8 @@ CREATE TABLE patients (
     id INTEGER NOT NULL,
     second_attack INTEGER,
     treatment INTEGER,
-    trait_anxiety INTEGER,
-    CONSTRAINT pk_patient PRIMARY key (id)
+    trait_anxiety INTEGER
+    --CONSTRAINT pk_patient PRIMARY key (id)
 );
 
 INSERT INTO patients(ID, second_attack, treatment, trait_anxiety) VALUES
@@ -112,8 +112,8 @@ CREATE TABLE crime (
     Unemp1  INTEGER,
     Unemp2  INTEGER,
     Median  INTEGER,
-    BelowMed INTEGER,
-	CONSTRAINT pk_crime PRIMARY key (id)
+    BelowMed INTEGER
+	--CONSTRAINT pk_crime PRIMARY key (id)
 );
 
 INSERT INTO crime(
@@ -197,8 +197,8 @@ CREATE TABLE grad_school (
     admit INTEGER,
     gre INTEGER,
     gpa DOUBLE PRECISION,
-    rank INTEGER,
-    CONSTRAINT pk_grad_school PRIMARY key (id)
+    rank INTEGER
+    --CONSTRAINT pk_grad_school PRIMARY key (id)
 );
 
 INSERT INTO grad_school (admit, gre, gpa, rank) VALUES
