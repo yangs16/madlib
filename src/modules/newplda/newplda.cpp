@@ -316,10 +316,6 @@ AnyType newplda_random_assign::run(AnyType & args)
  **/
 AnyType newplda_count_topic_sfunc::run(AnyType & args)
 {
-    if(!(args.getFCInfo()->context && IsA(args.getFCInfo()->context, AggState)))
-        throw std::runtime_error(
-            "this function should be called in an aggregator");
-
     if(args[4].isNull() || args[5].isNull())
         throw std::invalid_argument("null parameter - voc_size and/or \
         topic_num is null");
