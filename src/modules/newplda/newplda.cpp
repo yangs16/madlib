@@ -216,7 +216,7 @@ AnyType newplda_gibbs_sample::run(AnyType & args)
         throw std::invalid_argument( "invalid values in topic_assignment");
 
     int32_t __state_size = (voc_size + 1) * topic_num;
-    if (!args.getSysInfo()->user_fctx)
+    if (!args.getUserFuncContext())
     {
         if(args[3].isNull())
             throw std::invalid_argument("invalid argument - the model \
@@ -228,18 +228,18 @@ AnyType newplda_gibbs_sample::run(AnyType & args)
         if(__min(model) < 0)
             throw std::invalid_argument("invalid topic counts in model");
 
-        args.getSysInfo()->user_fctx =
-            MemoryContextAllocZero(
-                    args.getSysInfo()->cacheContext,
-                    __state_size * sizeof(int32_t));
-
-        int32_t * state = (int32_t *) args.getSysInfo()->user_fctx;
+        int32 * state = 
+            static_cast<int32 *>(
+                MemoryContextAllocZero(
+                    args.getCacheMemoryContext(), 
+                    __state_size * sizeof(int32_t)));
         memcpy(state, model.ptr(),  __state_size * sizeof(int32_t));
+        args.setUserFuncContext(state);
     }
 
-    int32_t * state = (int32_t *) args.getSysInfo()->user_fctx;
+    int32_t * state = static_cast<int32_t *>(args.getUserFuncContext());
     if(NULL == state){
-        throw std::runtime_error("the args.mSysInfo->user_fctx is null");
+        throw std::runtime_error("args.mSysInfo->user_fctx is null");
     }
 
     int32_t unique_word_count = words.size();
