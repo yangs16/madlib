@@ -334,3 +334,15 @@ AS $$
         );
 
 $$ LANGUAGE plpythonu;
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.assoc_array_eq
+    (
+    arr1 TEXT[],
+    arr2 TEXT[]
+    )
+RETURNS BOOL AS $$
+    SELECT COUNT(*) = array_upper($1, 1) AND array_upper($1, 1) = array_upper($2, 1)
+    FROM (SELECT unnest($1) id) t1, (SELECT unnest($2) id) t2
+    WHERE t1.id = t2.id;
+
+$$ LANGUAGE sql IMMUTABLE;

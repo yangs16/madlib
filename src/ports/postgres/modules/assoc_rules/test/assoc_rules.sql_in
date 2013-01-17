@@ -11,7 +11,7 @@
 -- Setup:
 ---------------------------------------------------------------------------
 /*
-CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.assoc_array_eq
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.assoc_rules_array_eq
     (
     arr1 TEXT[],
     arr2 TEXT[]
@@ -74,12 +74,6 @@ begin
     INSERT INTO test_data2 VALUES (7, 'beer');
     INSERT INTO test_data2 VALUES (7, 'diapers');
 
-    MADLIB_SCHEMA.assoc_rules (.1, .5, 'trans_id', 'product', 'test_data1','madlib_installcheck_assoc_rules', false);
-    MADLIB_SCHEMA.assoc_rules (.1, .5, 'trans_id', 'product', 'test_data2','madlib_installcheck_assoc_rules', false);
-
-    DROP TABLE IF EXISTS test_data1;
-    DROP TABLE IF EXISTS test_data2;
-/*
     DROP TABLE IF EXISTS test1_exp_result;
     CREATE TABLE test1_exp_result (
         ruleid integer,
@@ -122,24 +116,26 @@ begin
     INSERT INTO test2_exp_result VALUES (3, '{chips,beer}', '{diapers}', 0.2857142857142857, 0.66666666666666663, 0.93333333333333324, 0.85714285714285698);
     INSERT INTO test2_exp_result VALUES (5, '{chips}', '{beer}', 0.42857142857142855, 1, 1, 0);
 
+    SELECT MADLIB_SCHEMA.assoc_rules (.1, .5, 'trans_id', 'product', 'test_data1','madlib_installcheck_assoc_rules', false);
+/*
     -- ensure the members in the returned type was not changed by mistake.
     output_schema  = res.output_schema;
     output_table   = res.output_table;
     total_rules    = res.total_rules;
     total_time     = res.total_time;
-
-    SELECT INTO result1 CASE WHEN count(*) = 10 then 'PASS' ELSE 'FAIL' END
+*/
+    SELECT CASE WHEN count(*) = 10 then 'PASS' ELSE 'FAIL' END
     FROM assoc_rules t1, test1_exp_result t2
-    WHERE MADLIB_SCHEMA.assoc_array_eq(t1.pre, t2.pre) AND
-          MADLIB_SCHEMA.assoc_array_eq(t1.post, t2.post) AND
+    WHERE MADLIB_SCHEMA.assoc_rules_array_eq(t1.pre, t2.pre) AND
+          MADLIB_SCHEMA.assoc_rules_array_eq(t1.post, t2.post) AND
           abs(t1.support - t2.support) < 1E-10 AND
           abs(t1.confidence - t2.confidence) < 1E-10;
 
-    PERFORM MADLIB_SCHEMA.assoc_rules (.1, .5, 'trans_id', 'product', 'test_data2','madlib_installcheck_assoc_rules', false);
-    SELECT INTO result2 CASE WHEN count(*) = 7 then 'PASS' ELSE 'FAIL' END
+    SELECT MADLIB_SCHEMA.assoc_rules (.1, .5, 'trans_id', 'product', 'test_data2','madlib_installcheck_assoc_rules', false);
+    SELECT CASE WHEN count(*) = 7 then 'PASS' ELSE 'FAIL' END
     FROM assoc_rules t1, test2_exp_result t2
-    WHERE MADLIB_SCHEMA.assoc_array_eq(t1.pre, t2.pre) AND
-          MADLIB_SCHEMA.assoc_array_eq(t1.post, t2.post) AND
+    WHERE MADLIB_SCHEMA.assoc_rules_array_eq(t1.pre, t2.pre) AND
+          MADLIB_SCHEMA.assoc_rules_array_eq(t1.post, t2.post) AND
           abs(t1.support - t2.support) < 1E-10 AND
           abs(t1.confidence - t2.confidence) < 1E-10;
 
@@ -147,7 +143,7 @@ begin
     DROP TABLE IF EXISTS test_data2;
     DROP TABLE IF EXISTS test2_exp_result;
     DROP TABLE IF EXISTS test1_exp_result;
-
+/*
     IF result3 = 'FAIL' THEN
         RAISE EXCEPTION 'Input data transformation failed';
     END IF;
