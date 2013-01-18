@@ -140,9 +140,9 @@ select MADLIB_SCHEMA.svec_change(a,1,'{1}:{-50}'), a from test_pairs order by id
 create table corpus_proj as (select 10000 *|| ('{45,2,35,4,15,1}:{0,1,0,1,0,2}'::MADLIB_SCHEMA.svec) result );
 create table corpus_proj_array as (select result::float8[] from corpus_proj);
 -- Calculate on-disk size of sparse vector
-select pg_size_pretty(pg_total_relation_size('corpus_proj'));
+--select pg_size_pretty(pg_total_relation_size('corpus_proj'));
 -- Calculate on-disk size of normal array
-select pg_size_pretty(pg_total_relation_size('corpus_proj_array'));
+--select pg_size_pretty(pg_total_relation_size('corpus_proj_array'));
 
 -- Calculate L1 norm from sparse vector
 select MADLIB_SCHEMA.svec_l1norm(result) from corpus_proj;

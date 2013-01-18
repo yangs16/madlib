@@ -335,7 +335,7 @@ AS $$
 
 $$ LANGUAGE plpythonu;
 
-CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.assoc_array_eq
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.__assoc_rules_array_eq
     (
     arr1 TEXT[],
     arr2 TEXT[]

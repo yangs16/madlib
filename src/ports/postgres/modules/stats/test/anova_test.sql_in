@@ -10,6 +10,7 @@ CREATE TABLE nist_anova_test (
     resistance FLOAT8[]
 );
 
+/*
 COPY nist_anova_test(resistance) FROM stdin;
 {6.9,8.3,8.0}
 {5.4,6.8,10.5}
@@ -17,6 +18,13 @@ COPY nist_anova_test(resistance) FROM stdin;
 {4.6,9.2,6.9}
 {4.0,6.5,9.3}
 \.
+*/
+
+INSERT INTO nist_anova_test(resistance) VALUES (array[6.9,8.3,8.0]);
+INSERT INTO nist_anova_test(resistance) VALUES (array[5.4,6.8,10.5]);
+INSERT INTO nist_anova_test(resistance) VALUES (array[5.8,7.8,8.1]);
+INSERT INTO nist_anova_test(resistance) VALUES (array[4.6,9.2,6.9]);
+INSERT INTO nist_anova_test(resistance) VALUES (array[4.0,6.5,9.3]);
 
 CREATE TABLE one_way_anova_nist AS
 SELECT (one_way_anova(level, value)).* FROM (

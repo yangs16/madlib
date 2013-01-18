@@ -11,7 +11,7 @@
 -- Setup:
 ---------------------------------------------------------------------------
 /*
-CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.assoc_rules_array_eq
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.__assoc_rules_array_eq
     (
     arr1 TEXT[],
     arr2 TEXT[]
@@ -126,16 +126,16 @@ begin
 */
     SELECT CASE WHEN count(*) = 10 then 'PASS' ELSE 'FAIL' END
     FROM assoc_rules t1, test1_exp_result t2
-    WHERE MADLIB_SCHEMA.assoc_rules_array_eq(t1.pre, t2.pre) AND
-          MADLIB_SCHEMA.assoc_rules_array_eq(t1.post, t2.post) AND
+    WHERE MADLIB_SCHEMA.__assoc_rules_array_eq(t1.pre, t2.pre) AND
+          MADLIB_SCHEMA.__assoc_rules_array_eq(t1.post, t2.post) AND
           abs(t1.support - t2.support) < 1E-10 AND
           abs(t1.confidence - t2.confidence) < 1E-10;
 
     SELECT MADLIB_SCHEMA.assoc_rules (.1, .5, 'trans_id', 'product', 'test_data2','madlib_installcheck_assoc_rules', false);
     SELECT CASE WHEN count(*) = 7 then 'PASS' ELSE 'FAIL' END
     FROM assoc_rules t1, test2_exp_result t2
-    WHERE MADLIB_SCHEMA.assoc_rules_array_eq(t1.pre, t2.pre) AND
-          MADLIB_SCHEMA.assoc_rules_array_eq(t1.post, t2.post) AND
+    WHERE MADLIB_SCHEMA.__assoc_rules_array_eq(t1.pre, t2.pre) AND
+          MADLIB_SCHEMA.__assoc_rules_array_eq(t1.post, t2.post) AND
           abs(t1.support - t2.support) < 1E-10 AND
           abs(t1.confidence - t2.confidence) < 1E-10;
 

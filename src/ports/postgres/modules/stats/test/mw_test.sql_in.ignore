@@ -17,19 +17,17 @@ CREATE TABLE nist_mw_example (
 	rank_b FLOAT8
 );
 
-COPY nist_mw_example(group_a, rank_a, group_b, rank_b) FROM stdin;
-.55	8	.49	5
-.67	15.5	.68	17
-.43	1	.59	9.5
-.51	6	.72	19
-.48	3.5	.67	15.5
-.60	11	.75	20.5
-.71	18	.65	13.5
-.53	7	.77	22
-.44	2	.62	12
-.65	13.5	.48	3.5
-.75	20.5	.59	9.5
-\.
+INSERT INTO nist_mw_example VALUES(.55,8,.49,5);
+INSERT INTO nist_mw_example VALUES(.67,15.5,.68,17);
+INSERT INTO nist_mw_example VALUES(.43,1,.59,9.5);
+INSERT INTO nist_mw_example VALUES(.51,6,.72,19);
+INSERT INTO nist_mw_example VALUES(.48,3.5,.67,15.5);
+INSERT INTO nist_mw_example VALUES(.60,11,.75,20.5);
+INSERT INTO nist_mw_example VALUES(.71,18,.65,13.5);
+INSERT INTO nist_mw_example VALUES(.53,7,.77,22);
+INSERT INTO nist_mw_example VALUES(.44,2,.62,12);
+INSERT INTO nist_mw_example VALUES(.65,13.5,.48,3.5);
+INSERT INTO nist_mw_example VALUES(.75,20.5,.59,9.5);
 
 CREATE TABLE mw_test AS
 SELECT (mw_test(from_first, value ORDER BY value)).*

@@ -14,8 +14,8 @@ CREATE TABLE leukemia (
     id INTEGER NOT NULL,
     grp DOUBLE PRECISION,
     wbc DOUBLE PRECISION,
-    timeDeath INTEGER,
-    CONSTRAINT pk_leukemia PRIMARY key (id)
+    timeDeath INTEGER
+    --CONSTRAINT pk_leukemia PRIMARY key (id)
 );
 
 

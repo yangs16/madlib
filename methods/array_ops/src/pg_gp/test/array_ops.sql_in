@@ -10,6 +10,7 @@
 ---------------------------------------------------------------------------
 -- Setup: 
 ---------------------------------------------------------------------------
+/*
 CREATE FUNCTION install_test() 
 RETURNS TEXT AS $$ 
 declare
@@ -20,16 +21,42 @@ declare
     result_num3 float := 0;
     result TEXT;
 begin
+*/
 
-    SELECT INTO result_num1 MADLIB_SCHEMA.array_dot(MADLIB_SCHEMA.array_mult(MADLIB_SCHEMA.array_add(an,b), MADLIB_SCHEMA.array_sub(an,b)), MADLIB_SCHEMA.array_mult(MADLIB_SCHEMA.array_div(an,b), MADLIB_SCHEMA.normalize(an)));
-    b[4] = NULL;
-    SELECT INTO result_num2 (MADLIB_SCHEMA.array_max(b)+MADLIB_SCHEMA.array_min(b)+MADLIB_SCHEMA.array_sum(b)+MADLIB_SCHEMA.array_sum_big(b)+
-    MADLIB_SCHEMA.array_mean(b)+MADLIB_SCHEMA.array_stddev(b));
-    SELECT INTO result_num3 MADLIB_SCHEMA.array_sum(MADLIB_SCHEMA.array_scalar_mult(MADLIB_SCHEMA.array_fill(MADLIB_SCHEMA.array_of_float(20), 234.343::FLOAT8),3.7::FLOAT));
-    result_num1 = result_num1+result_num2+result_num3-17371.7254700712;
+    SELECT
+        assert(abs(res1 + res2 + res3 - 17371.7254700712) < 0.01, 'FAIL')
+    FROM
+    (
+        SELECT
+            MADLIB_SCHEMA.array_dot(
+                MADLIB_SCHEMA.array_mult(MADLIB_SCHEMA.array_add(an,b),
+                MADLIB_SCHEMA.array_sub(an,b)),
+            MADLIB_SCHEMA.array_mult(
+                MADLIB_SCHEMA.array_div(an,b),
+                MADLIB_SCHEMA.normalize(an))) res1 
+        FROM (SELECT array[1,2,3]::FLOAT[] an, array[4,5,7]::FLOAT[] b) t
+    ) t1,
+    (
+        SELECT
+            (MADLIB_SCHEMA.array_max(b) + 
+             MADLIB_SCHEMA.array_min(b) + 
+             MADLIB_SCHEMA.array_sum(b) +
+             MADLIB_SCHEMA.array_sum_big(b) +
+             MADLIB_SCHEMA.array_mean(b) + 
+             MADLIB_SCHEMA.array_stddev(b)) res2 
+        FROM (SELECT array[4,5,7,NULL]::FLOAT[] b) t
+    ) t2,
+    (
+        SELECT
+            MADLIB_SCHEMA.array_sum(
+                MADLIB_SCHEMA.array_scalar_mult(
+                    MADLIB_SCHEMA.array_fill(
+                        MADLIB_SCHEMA.array_of_float(20),
+                        234.343::FLOAT8),3.7::FLOAT)) res3
+    ) t3;
     
+/*    
     SELECT INTO result CASE WHEN((result_num1 < .01)AND(result_num1 > -.01)) THEN 'PASS' ELSE 'FAIL' END;
-    
     IF result = 'FAIL' THEN
         RAISE EXCEPTION 'Failed install check';
     END IF;
@@ -42,7 +69,7 @@ end $$ language plpgsql;
 -- Test
 ---------------------------------------------------------------------------
 SELECT install_test();
-
+*/
 -- array_agg
 create table test as select generate_series(1,100) x;
 select MADLIB_SCHEMA.array_agg(x) from test;

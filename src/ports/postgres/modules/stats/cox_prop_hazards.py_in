@@ -67,7 +67,8 @@ def __runIterativeAlg(stateType, intermediateStateType, initialState, source,
         WHERE
             st._madlib_iteration = {{iteration}}-1
 				;
-				DELETE FROM _cox_intermediate_state;
+				--DELETE FROM _cox_intermediate_state;
+				TRUNCATE TABLE _cox_intermediate_state;
         """.format(updateExpr = updateExpr,
                 intermediateExpr = intermediateExpr,
                 resultExpr = resultExpr,
@@ -99,7 +100,7 @@ def __runIterativeAlg(stateType, intermediateStateType, initialState, source,
         SET client_min_messages = error;
         DROP TABLE IF EXISTS _madlib_iterative_alg;
         CREATE TEMPORARY TABLE _madlib_iterative_alg (
-            _madlib_iteration INTEGER PRIMARY KEY,
+            _madlib_iteration INTEGER,--PRIMARY KEY,
             _madlib_state {stateType}
         );
 				DROP TABLE IF EXISTS _cox_intermediate_state;
