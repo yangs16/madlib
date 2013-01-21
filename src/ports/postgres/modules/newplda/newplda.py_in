@@ -93,7 +93,7 @@ class PLDATrainer:
 
     def init_random(self):
         stime = time.time()
-        plpy.info('initializing topics randomly..')
+        plpy.log('initializing topics randomly..')
 
         plpy.execute('TRUNCATE TABLE %s' % (self.work_table_0));
         plpy.execute("""
@@ -109,11 +109,11 @@ class PLDATrainer:
             )
 
         etime = time.time()
-        plpy.info('\t\ttime elapsed: %.2f seconds' % (etime - stime))
+        plpy.log('\t\ttime elapsed: %.2f seconds' % (etime - stime))
 
     def gen_model(self):
         stime = time.time()
-        plpy.info('\t\tgenerating models..')
+        plpy.log('\t\tgenerating models..')
 
         work_table_final = self.work_table_1
         if self.iter_num % 2 == 0:
@@ -136,11 +136,11 @@ class PLDATrainer:
             )
 
         etime = time.time()
-        plpy.info('\t\t\ttime elapsed: %.2f seconds' % (etime - stime))
+        plpy.log('\t\t\ttime elapsed: %.2f seconds' % (etime - stime))
 
     def gen_output_data_table(self):
         stime = time.time()
-        plpy.info('\t\tgenerating output data table..')
+        plpy.log('\t\tgenerating output data table..')
 
         work_table_final = self.work_table_1
         if self.iter_num % 2 == 0:
@@ -158,7 +158,7 @@ class PLDATrainer:
             work_table_final))
 
         etime = time.time()
-        plpy.info('\t\t\ttime elapsed: %.2f seconds' % (etime - stime))
+        plpy.log('\t\t\ttime elapsed: %.2f seconds' % (etime - stime))
 
     def iteration(self, it):  
         stime = time.time()
@@ -171,8 +171,8 @@ class PLDATrainer:
         if it % 2 == 0 :
             work_table_out = self.work_table_0
 
-        plpy.info('iteration [%d]...' % (it))
-        plpy.info('\t\tjoining & sampling ..')
+        plpy.log('iteration [%d]...' % (it))
+        plpy.log('\t\tjoining & sampling ..')
         plpy.execute('TRUNCATE TABLE %s' % (work_table_out))
         plpy.execute("""
             INSERT INTO %s
@@ -216,11 +216,11 @@ class PLDATrainer:
             )
 
         etime = time.time()
-        plpy.info('\t\ttime elapsed: %.2f seconds' % (etime - stime))
+        plpy.log('\t\ttime elapsed: %.2f seconds' % (etime - stime))
 
     def run(self):
         stime = time.time()
-        plpy.info('start training process..')
+        plpy.log('start training process..')
 
         self.init_random()
         for it in range(1, self.iter_num + 1):
@@ -229,7 +229,7 @@ class PLDATrainer:
         self.gen_output_data_table()
 
         etime = time.time()
-        plpy.info('finished, time elapsed: %.2f seconds' % (etime - stime))
+        plpy.log('finished, time elapsed: %.2f seconds' % (etime - stime))
 
 """
 @brief This class defines a PLDAPredictor
@@ -303,7 +303,7 @@ class PLDAPredictor:
 
     def init_random(self):
         stime = time.time()
-        plpy.info('initializing topics randomly..')
+        plpy.log('initializing topics randomly..')
 
         plpy.execute('TRUNCATE TABLE %s' % (self.work_table_0));
         plpy.execute("""
@@ -319,7 +319,7 @@ class PLDAPredictor:
             ) 
 
         etime = time.time()
-        plpy.info('\t\ttime elapsed: %.2f seconds' % (etime - stime))
+        plpy.log('\t\ttime elapsed: %.2f seconds' % (etime - stime))
 
     def gen_output_table(self):
         plpy.execute('TRUNCATE TABLE %s' % (self.doc_topic))
@@ -335,7 +335,7 @@ class PLDAPredictor:
 
     def infer(self):  
         stime = time.time()
-        plpy.info('infering..')
+        plpy.log('infering..')
 
         plpy.execute("""
             INSERT INTO %s
@@ -369,18 +369,18 @@ class PLDAPredictor:
                 self.work_table_0, self.model_table, self.work_table_0))
 
         etime = time.time()
-        plpy.info('\t\ttime elapsed: %.2f seconds' % (etime - stime))
+        plpy.log('\t\ttime elapsed: %.2f seconds' % (etime - stime))
 
     def run(self):
         stime = time.time()
-        plpy.info('start prediction process..')
+        plpy.log('start prediction process..')
 
         self.init_random()
         self.infer()
         self.gen_output_table()
 
         etime = time.time()
-        plpy.info('finished, time elapsed: %.2f seconds' % (etime - stime))
+        plpy.log('finished, time elapsed: %.2f seconds' % (etime - stime))
 
 """
 @brief This function provides the entry for the plda training process. 
@@ -807,7 +807,7 @@ wordcount, words, counts>.
 @param return       The converted table name
 """
 def __convert_data_table(madlib_schema, data_table):
-    plpy.info('converting the data table ...')
+    plpy.log('converting the data table ...')
     convt_table = '__newplda_convt_corpus__'
     plpy.execute('DROP TABLE IF EXISTS %s' % (convt_table))
     plpy.execute("""
@@ -859,7 +859,7 @@ def __warn(condition, msg):
 @param data_table   The data table name
 """
 def __check_data_table(data_table):
-    plpy.info('checking the data table ... ')
+    plpy.log('checking the data table ... ')
     try:
         rv = plpy.execute("""
             SELECT count(*) cnt FROM pg_attribute 
@@ -884,7 +884,7 @@ def __check_data_table(data_table):
 @param voc_size     The size of vocabulary
 """
 def __validate_data_table(data_table, voc_size):
-    plpy.info('validating the data table ...')
+    plpy.log('validating the data table ...')
     __check_data_table(data_table)
     rv = plpy.execute('SELECT count(*) cnt FROM %s WHERE docid < 0' % (data_table))
     __warn(
@@ -944,7 +944,7 @@ def __validate_data_table(data_table, voc_size):
 @param vocab_table   The vocabulary table name
 """
 def __check_vocab_table(vocab_table):
-    plpy.info('checking the vocabulary table ...')
+    plpy.log('checking the vocabulary table ...')
     try:
         rv = plpy.execute("""
             SELECT count(*) cnt FROM pg_attribute 
@@ -966,7 +966,7 @@ def __check_vocab_table(vocab_table):
 @param vocab_table   The normalized vocabulary table name
 """
 def __check_norm_vocab_table(vocab_table):
-    plpy.info('checking the normalized vocabulary table ...')
+    plpy.log('checking the normalized vocabulary table ...')
     try:
         rv = plpy.execute("""
             SELECT count(*) cnt FROM pg_attribute 
@@ -990,7 +990,7 @@ def __check_norm_vocab_table(vocab_table):
 @param model_table  Model table name
 """
 def __check_model_table(model_table):
-    plpy.info('checking the model table ...')
+    plpy.log('checking the model table ...')
     try:
         rv = plpy.execute("""
             SELECT count(*) cnt 

@@ -116,7 +116,10 @@ begin
     INSERT INTO test2_exp_result VALUES (3, '{chips,beer}', '{diapers}', 0.2857142857142857, 0.66666666666666663, 0.93333333333333324, 0.85714285714285698);
     INSERT INTO test2_exp_result VALUES (5, '{chips}', '{beer}', 0.42857142857142855, 1, 1, 0);
 
-    SELECT MADLIB_SCHEMA.assoc_rules (.1, .5, 'trans_id', 'product', 'test_data1','madlib_installcheck_assoc_rules', false);
+    SELECT output_schema, output_table, total_rules 
+    FROM MADLIB_SCHEMA.assoc_rules(
+        .1, .5, 'trans_id', 'product',
+        'test_data1','madlib_installcheck_assoc_rules', false);
 /*
     -- ensure the members in the returned type was not changed by mistake.
     output_schema  = res.output_schema;
@@ -131,7 +134,11 @@ begin
           abs(t1.support - t2.support) < 1E-10 AND
           abs(t1.confidence - t2.confidence) < 1E-10;
 
-    SELECT MADLIB_SCHEMA.assoc_rules (.1, .5, 'trans_id', 'product', 'test_data2','madlib_installcheck_assoc_rules', false);
+    SELECT output_schema, output_table, total_rules 
+    FROM MADLIB_SCHEMA.assoc_rules(
+        .1, .5, 'trans_id', 'product',
+        'test_data2','madlib_installcheck_assoc_rules', false);
+
     SELECT CASE WHEN count(*) = 7 then 'PASS' ELSE 'FAIL' END
     FROM assoc_rules t1, test2_exp_result t2
     WHERE MADLIB_SCHEMA.__assoc_rules_array_eq(t1.pre, t2.pre) AND

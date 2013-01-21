@@ -32,13 +32,17 @@ FROM kmeans_2d
 ORDER BY random()
 LIMIT 10;
 
-SELECT * FROM kmeanspp('kmeans_2d', 'position', 10);
+SELECT array_upper(centroids, 1) 
+FROM kmeanspp('kmeans_2d', 'position', 10);
 
-SELECT * FROM kmeans_random('kmeans_2d', 'position', 10);
+SELECT array_upper(centroids, 1) 
+FROM kmeans_random('kmeans_2d', 'position', 10);
+ 
+SELECT array_upper(centroids, 1) 
+FROM kmeans('kmeans_2d', 'position', 'centroids', 'position');
 
-SELECT * FROM kmeans('kmeans_2d', 'position', 'centroids', 'position');
-
-SELECT * FROM kmeans('kmeans_2d', 'position', ARRAY[
+SELECT array_upper(centroids, 1) 
+FROM kmeans('kmeans_2d', 'position', ARRAY[
     ARRAY[10,10],
     ARRAY[20,20],
     ARRAY[30,30],
