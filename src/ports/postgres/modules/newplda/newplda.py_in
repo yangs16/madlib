@@ -399,29 +399,29 @@ def plda_train(
     topic_num, iter_num, alpha, beta):
 
     __assert(
-        train_table != '',  
-        'invalid argument:  Non-empty string expected for train_table')
+        train_table.strip() != '',  
+        'invalid argument:  train_table is not specified')
     __assert(
-        model_table != '',
-        'invalid argument:  Non-empty string expected for model_table')
+        model_table.strip() != '',
+        'invalid argument:  model_table is not specified')
     __assert(
-        output_data_table != '',
-        'invalid argument:  Non-empty string expected for output_data_table')
+        output_data_table.strip() != '',
+        'invalid argument:  output_data_table is not specified')
     __assert(
         voc_size > 0, 
-        'invalid argument: Positive integer expected for voc_size')
+        'invalid argument: positive integer expected for voc_size')
     __assert(
         topic_num > 0, 
-        'invalid argument: Positive integer expected for topic_num')
+        'invalid argument: positive integer expected for topic_num')
     __assert(
         iter_num >= 0,
-        'invalid argument: Positive integer expected for iter_num')
+        'invalid argument: positive integer expected for iter_num')
     __assert(
         alpha > 0, 
-        'invalid argument: Positive real expected for alpha')
+        'invalid argument: positive real expected for alpha')
     __assert(
         beta > 0, 
-        'invalid argument: Positive real expected for beta')
+        'invalid argument: positive real expected for beta')
 
     __warn(
         voc_size <= 1e5,
@@ -450,17 +450,17 @@ def plda_predict(
     madlib_schema, test_table, model_table, output_data_table, iter_num = 20):
 
     __assert(
-        test_table != '',  
-        'invalid argument:  Non-empty string expected for test_table')
+        test_table.strip() != '',  
+        'invalid argument: test_table is not specified')
     __assert(
-        model_table != '', 
-        'invalid argument:  Non-empty string expected for model_table')
+        model_table.strip() != '', 
+        'invalid argument: model_table is not specified')
     __assert(
-        output_data_table != '',
-        'invalid argument:  Non-empty string expected for output_data_table')
+        output_data_table.strip() != '',
+        'invalid argument: output_data_table is not specified')
     __assert(
         iter_num >= 0, 
-        'invalid argument: Positive integer expected for iter_num')
+        'invalid argument: positive integer expected for iter_num')
     __warn(
         iter_num <= 20,
         """the iter_num is large: %d - a smaller iter_num (e.g. 20) should be
@@ -831,6 +831,10 @@ def __convert_data_table(madlib_schema, data_table):
             %s.array_agg(count) counts
         FROM
             %s data
+        WHERE
+            (docid IS NOT NULL) AND 
+            (wordid IS NOT NULL) AND 
+            (count IS NOT NULL)
         GROUP BY docid
         """ % (convt_table, madlib_schema, madlib_schema, data_table))
 
@@ -860,6 +864,7 @@ def __warn(condition, msg):
 """
 def __check_data_table(data_table):
     plpy.info('checking the data table ... ')
+    assert(data_table.strip(), 'no data table is specified')
     try:
         rv = plpy.execute("""
             SELECT count(*) cnt FROM pg_attribute 
@@ -896,7 +901,7 @@ def __validate_data_table(data_table, voc_size):
     __assert(
         rv[0]['cnt'] == 0,
         """%d rows have negative wordid - the wordid must range from 0 to
-        voc_size - 1""" % (rv[0]['cnt'] == 0))
+        voc_size - 1""" % (rv[0]['cnt']))
 
     rv = plpy.execute("""
         SELECT 
@@ -910,6 +915,9 @@ def __validate_data_table(data_table, voc_size):
             GROUP BY wordid
         ) t1
         """ % (data_table))
+    if 0 == rv[0]['size']:
+        plpy.warning('empty data table')
+        return
     __assert(
         rv[0]['size'] <= voc_size,
         """the actual size of vocabulary %d is larger than the specified %d -
@@ -937,7 +945,7 @@ def __validate_data_table(data_table, voc_size):
     __assert(
         rv[0]['cnt'] == 0,
         """%d rows have zero or negative count - the value in the count column
-        must be positive integers""" % (rv[0]['cnt'] == 0))
+        must be positive integers""" % (rv[0]['cnt']))
 
 """
 @brief Check the validity of the vocabulary table
