@@ -489,7 +489,7 @@ def get_topic_desc(
         model_table != '' and
         vocab_table != '' and
         desc_table != '',
-        'invalid argument:  Non-empty string expected for table names')
+        'invalid argument: at least one of the table names is not specified')
 
     __assert(
         top_k > 0,
@@ -582,7 +582,7 @@ def get_topic_word_count(madlib_schema, model_table, output_table):
     __assert(
         model_table != '' and
         output_table != '',
-        'invalid argument:  Non-empty string expected for table names')
+        'invalid argument: at least one of the table names is not specified')
 
     __check_model_table(model_table) 
 
@@ -615,7 +615,7 @@ def get_word_topic_count(madlib_schema, model_table, output_table):
     __assert(
         model_table != '' and
         output_table != '',
-        'invalid argument: non-empty string expected for table names')
+        'invalid argument: at least one of the table names is not specified')
 
     __check_model_table(model_table) 
 
@@ -916,7 +916,7 @@ def __validate_data_table(data_table, voc_size):
         ) t1
         """ % (data_table))
     if 0 == rv[0]['size']:
-        plpy.warning('empty data table')
+        plpy.warning('%s is empty' % (data_table))
         return
     __assert(
         rv[0]['size'] <= voc_size,
@@ -1028,7 +1028,7 @@ def __check_model_table(model_table):
         """ % (model_table))
     __assert(
         len(rv) > 0, 
-        'the %s should not be empty' % (model_table))
+        '%s is empty' % (model_table))
     __assert(
         len(rv) == 1, 
         'the %s should have only 1 row' % (model_table))
