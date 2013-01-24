@@ -127,7 +127,7 @@ def assoc_rules(madlib_schema, support, confidence, tid_col,
             lift        FLOAT8,
             conviction  FLOAT8
             )
-        m4_ifdef(`__GREENPLUM__',`DISTRIBUTED BY (ruleId)')""".format(output_schema)
+        """.format(output_schema)
         );
 
     # the auxiliary table for keeping the association rules
