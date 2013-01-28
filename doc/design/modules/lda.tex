@@ -16,7 +16,7 @@
 LDA is a very popular technique for topic modeling. This module implements a parallel Gibbs sampling algorithm for LDA inference.
 
 \section{Overview of LDA}
-LDA\cite{Blei:2003:LDA:944919.944937} is a very popular technique for discovering the main themes or
+LDA\cite{Blei:2003} is a very popular technique for discovering the main themes or
 topics from a large collection of unstructured documents and has been widely
 applied to various fields, including text mining, computer vision, finance,
 bioinformatics, cognitive science, music, and social sciences. 
@@ -63,7 +63,7 @@ According to this equation, we can update the topic assignment to each word sequ
 \subsection{Parallization}
 The parallization of the above algirhtm is very straightforward. The basic idea is to distribute a large set of documents to a cluster of segment nodes and allow each segment node to do Gibbs sampling on a subset of documents locally. Note that at the end of each iteration, the local models generated on each segment node will be merged to generate a global model, which will be distributed to each segment node at the begining of next iteration. 
 
-Refer to \cite{Wang:2009:PPL:1574036.1574062} for a similar parallel implementation based on MPI and MapReduce.
+Refer to \cite{Wang:2009} for a similar parallel implementation based on MPI and MapReduce.
 
 \subsection{Formal Description}
 \begin{algorithm}[gibbs-lda$(D, T, \alpha, \beta)$] \label{alg:gibbs-lda}
