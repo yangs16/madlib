@@ -544,7 +544,11 @@ def get_topic_desc(
 
     plpy.execute('DROP TABLE IF EXISTS %s' % (desc_table))
     plpy.execute("""
-        CREATE TABLE %s (topicid INT4, wordid INT4, prob FLOAT, word TEXT)
+        CREATE TABLE %s (
+            topicid INT4, 
+            wordid INT4, 
+            prob FLOAT, 
+            word TEXT)
         m4_ifdef(
             `__GREENPLUM__', 
             `WITH (APPENDONLY=TRUE, COMPRESSTYPE=QUICKLZ) DISTRIBUTED BY
