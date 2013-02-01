@@ -1,10 +1,10 @@
 """
-@file newplda.py_in 
+@file lda.py_in 
 
 @brief Latent Dirichlet Allocation inference using collapsed Gibbs
 sampling algorithm
 
-@namespace newplda
+@namespace lda
 
 LDA: Driver and auxiliary functions
 """
@@ -14,9 +14,9 @@ import math
 import time
 
 """
-@brief This class defines a PLDATrainer.
+@brief This class defines a LDATrainer.
 """
-class PLDATrainer:
+class LDATrainer:
     def __init__(
         self, madlib_schema, data_table, model_table, output_data_table,
         voc_size, topic_num, iter_num, alpha, beta): 
@@ -101,7 +101,7 @@ class PLDATrainer:
             SELECT
                 m4_ifdef(`__GREENPLUM__', `gp_segment_id', `1'),
                 docid, wordcount, words, counts, 
-                %s.__newplda_random_assign(wordcount, %s) 
+                %s.__lda_random_assign(wordcount, %s) 
             FROM %s data
             """ % (
                 self.work_table_0, self.madlib_schema, self.topic_num,
@@ -124,7 +124,7 @@ class PLDATrainer:
             INSERT INTO %s
             SELECT 
                 %d, %d, %f, %f, 
-                %s.__newplda_count_topic_agg(
+                %s.__lda_count_topic_agg(
                     words, counts, doc_topic[%d:array_upper(doc_topic, 1)], %d,
                     %d) model 
             FROM
@@ -178,7 +178,7 @@ class PLDATrainer:
             INSERT INTO %s
             SELECT  
                 distid, docid, wordcount, words, counts,  
-                %s.__newplda_gibbs_sample(
+                %s.__lda_gibbs_sample(
                     words, counts, doc_topic, model, %f, %f, %d, %d, 1)
             FROM
             (
@@ -192,7 +192,7 @@ class PLDATrainer:
                     FROM
                     (
                         SELECT
-                            %s.__newplda_count_topic_agg(
+                            %s.__lda_count_topic_agg(
                                 words, counts,
                                 doc_topic[%d:array_upper(doc_topic, 1)], %d, %d) model 
                         FROM %s dcz 
@@ -232,9 +232,9 @@ class PLDATrainer:
         plpy.info('finished, time elapsed: %.2f seconds' % (etime - stime))
 
 """
-@brief This class defines a PLDAPredictor
+@brief This class defines a LDAPredictor
 """
-class PLDAPredictor:
+class LDAPredictor:
     def __init__(
         self, madlib_schema, test_table, model_table, output_table, iter_num):
         self.madlib_schema = madlib_schema
@@ -311,7 +311,7 @@ class PLDAPredictor:
             SELECT 
                 m4_ifdef(`__GREENPLUM__', `gp_segment_id', `1'),
                 docid, wordcount, words, counts,
-                %s.__newplda_random_assign(wordcount, %s) doc_topic 
+                %s.__lda_random_assign(wordcount, %s) doc_topic 
             FROM %s data
             """ % (
                 self.work_table_0, self.madlib_schema,
@@ -341,7 +341,7 @@ class PLDAPredictor:
             INSERT INTO %s
             SELECT  
                 distid, docid, wordcount, words, counts,
-                %s.__newplda_gibbs_sample(
+                %s.__lda_gibbs_sample(
                     words, counts, doc_topic, model, %f, %f, %d, %d, %d)
             FROM
             (
@@ -383,7 +383,7 @@ class PLDAPredictor:
         plpy.info('finished, time elapsed: %.2f seconds' % (etime - stime))
 
 """
-@brief This function provides the entry for the plda training process. 
+@brief This function provides the entry for the LDA training process. 
 @param madlib_schema        MDALib schema
 @param data_table           Training data table
 @param voc_size             Size of vocabulary
@@ -394,7 +394,7 @@ class PLDAPredictor:
 @param model_table          Learned model table
 @param output_data_table    Output data table
 """
-def plda_train(
+def lda_train(
     madlib_schema, train_table, model_table, output_data_table, voc_size,
     topic_num, iter_num, alpha, beta):
 
@@ -434,19 +434,19 @@ def plda_train(
 
     __validate_data_table(train_table, voc_size)
     convt_table = __convert_data_table(madlib_schema, train_table)
-    pt = PLDATrainer(
+    lt = LDATrainer(
         madlib_schema, convt_table, model_table, output_data_table, voc_size,
         topic_num, iter_num, alpha, beta) 
-    pt.run()
+    lt.run()
 
 """
-@brief This function provides the entry for the plda prediction process.
+@brief This function provides the entry for the LDA prediction process.
 @param test_table       name of the testing dataset table
 @param model_table      name of the model table
 @param iter_num         number of iterations
 @param output_table     name of output table
 """
-def plda_predict(
+def lda_predict(
     madlib_schema, test_table, model_table, output_data_table, iter_num = 20):
 
     __assert(
@@ -472,9 +472,9 @@ def plda_predict(
     __validate_data_table(test_table, voc_size)    
 
     convt_table = __convert_data_table(madlib_schema, test_table)
-    pp = PLDAPredictor(
+    lp = LDAPredictor(
         madlib_schema, convt_table, model_table, output_data_table, iter_num) 
-    pp.run()
+    lp.run()
 
 """
 @brief Get the per-topic description by top-k words
@@ -498,9 +498,9 @@ def get_topic_desc(
     __check_model_table(model_table) 
     __check_vocab_table(vocab_table)
 
-    plpy.execute('DROP TABLE IF EXISTS __newplda_topic_word_count__')
+    plpy.execute('DROP TABLE IF EXISTS __lda_topic_word_count__')
     plpy.execute("""
-        CREATE TEMP TABLE __newplda_topic_word_count__(
+        CREATE TEMP TABLE __lda_topic_word_count__(
             topicid INT4, 
             word_count INT4[], 
             beta FLOAT8
@@ -512,18 +512,18 @@ def get_topic_desc(
         """)
 
     plpy.execute("""
-        INSERT INTO __newplda_topic_word_count__
+        INSERT INTO __lda_topic_word_count__
         SELECT 
             generate_series(1, topic_num) topicid,
-            %s.__newplda_util_unnest(
-                %s.__newplda_util_transpose(model[1:array_upper(model, 1) - 1])) word_count,
+            %s.__lda_util_unnest(
+                %s.__lda_util_transpose(model[1:array_upper(model, 1) - 1])) word_count,
             beta
         FROM %s model
         """ % (madlib_schema, madlib_schema, model_table))
 
-    plpy.execute('DROP TABLE IF EXISTS __newplda_topic_word_dist__')
+    plpy.execute('DROP TABLE IF EXISTS __lda_topic_word_dist__')
     plpy.execute("""
-        CREATE TEMP TABLE __newplda_topic_word_dist__(
+        CREATE TEMP TABLE __lda_topic_word_dist__(
             topicid INT4, 
             word_dist FLOAT[]
         )
@@ -534,12 +534,12 @@ def get_topic_desc(
         """)
 
     plpy.execute("""
-        INSERT INTO __newplda_topic_word_dist__
+        INSERT INTO __lda_topic_word_dist__
         SELECT 
             topicid, 
-            %s.__newplda_util_norm_with_smoothing(word_count, beta) dist 
+            %s.__lda_util_norm_with_smoothing(word_count, beta) dist 
         FROM
-            __newplda_topic_word_count__
+            __lda_topic_word_count__
         """ % (madlib_schema))
 
     plpy.execute('DROP TABLE IF EXISTS %s' % (desc_table))
@@ -571,7 +571,7 @@ def get_topic_desc(
                     generate_series(0, array_upper(word_dist, 1) - 1) wordid,
                     unnest(word_dist) prob
                 FROM
-                    __newplda_topic_word_dist__
+                    __lda_topic_word_dist__
             ) t1
         ) t2, %s vocab
         WHERE t2.r < %d AND t2.wordid = vocab.wordid
@@ -605,8 +605,8 @@ def get_topic_word_count(madlib_schema, model_table, output_table):
         INSERT INTO %s 
         SELECT 
             generate_series(1, topic_num) topicid,   
-            %s.__newplda_util_unnest(
-                %s.__newplda_util_transpose(model[1:array_upper(model, 1) - 1])) word_count
+            %s.__lda_util_unnest(
+                %s.__lda_util_transpose(model[1:array_upper(model, 1) - 1])) word_count
         FROM %s model
         """ % (output_table, madlib_schema, madlib_schema, model_table))
 
@@ -638,7 +638,7 @@ def get_word_topic_count(madlib_schema, model_table, output_table):
         INSERT INTO %s 
         SELECT 
             generate_series(0, voc_size - 1) wordid,   
-            %s.__newplda_util_unnest(model[1:array_upper(model, 1) - 1]) topic_count
+            %s.__lda_util_unnest(model[1:array_upper(model, 1) - 1]) topic_count
         FROM %s
         """ % (output_table, madlib_schema, model_table))
 
@@ -812,7 +812,7 @@ wordcount, words, counts>.
 """
 def __convert_data_table(madlib_schema, data_table):
     plpy.info('converting the data table ...')
-    convt_table = '__newplda_convt_corpus__'
+    convt_table = '__lda_convt_corpus__'
     plpy.execute('DROP TABLE IF EXISTS %s' % (convt_table))
     plpy.execute("""
         CREATE TEMP TABLE %s

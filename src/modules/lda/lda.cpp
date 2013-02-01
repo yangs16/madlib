@@ -1,6 +1,6 @@
 /* ----------------------------------------------------------------------- *//**
  *
- * @file newplda.cpp
+ * @file lda.cpp
  *
  * @brief Functions for Latent Dirichlet Allocation
  *
@@ -14,11 +14,11 @@
 #include <algorithm>
 #include <functional>
 #include <numeric>
-#include "newplda.hpp"
+#include "lda.hpp"
 
 namespace madlib {
 namespace modules {
-namespace newplda {
+namespace lda {
 
 using madlib::dbconnector::postgres::madlib_get_typlenbyvalalign;
 using madlib::dbconnector::postgres::madlib_construct_array;
@@ -59,7 +59,7 @@ static type_info INT4TI(INT4OID);
  * function is local to this file only, so this function cannot be maliciously
  * called by intruders.
  **/
-static int32_t __newplda_gibbs_sample(
+static int32_t __lda_gibbs_sample(
     int32_t topic_num, int32_t topic, const int32_t * count_d_z, const int32_t * count_w_z,
     const int32_t * count_z, double alpha, double beta) 
 {
@@ -169,7 +169,7 @@ static int32_t __sum(ArrayHandle<int32_t> ah){
  * @return          The updated topic counts and topic assignments for
  *                  the document
  **/
-AnyType newplda_gibbs_sample::run(AnyType & args)
+AnyType lda_gibbs_sample::run(AnyType & args)
 {
     ArrayHandle<int32_t> words = args[0].getAs<ArrayHandle<int32_t> >();
     ArrayHandle<int32_t> counts = args[1].getAs<ArrayHandle<int32_t> >();
@@ -249,7 +249,7 @@ AnyType newplda_gibbs_sample::run(AnyType & args)
             int32_t wordid = words[i];
             for(int32_t j = 0; j < counts[i]; j++){
                 int32_t topic = doc_topic[word_index];
-                int32_t retopic = __newplda_gibbs_sample(
+                int32_t retopic = __lda_gibbs_sample(
                     topic_num, topic, doc_topic.ptr(), 
                     state + wordid * topic_num, 
                     state + voc_size * topic_num, alpha, beta);
@@ -278,7 +278,7 @@ AnyType newplda_gibbs_sample::run(AnyType & args)
  * @result          The topic counts and topic assignments 
  *                  (length = topic_num + word_count)
  **/
-AnyType newplda_random_assign::run(AnyType & args)
+AnyType lda_random_assign::run(AnyType & args)
 {
     int32_t word_count = args[0].getAs<int32_t>();
     int32_t topic_num = args[1].getAs<int32_t>();
@@ -314,7 +314,7 @@ AnyType newplda_random_assign::run(AnyType & args)
  * @param args[5]   The number of topics 
  * @return          The updated state
  **/
-AnyType newplda_count_topic_sfunc::run(AnyType & args)
+AnyType lda_count_topic_sfunc::run(AnyType & args)
 {
     if(args[4].isNull() || args[5].isNull())
         throw std::invalid_argument("null parameter - voc_size and/or \
@@ -383,7 +383,7 @@ AnyType newplda_count_topic_sfunc::run(AnyType & args)
  * @param args[1]   The state variable, local topic counts
  * @return          The merged state, element-wise sum of two local states
  **/
-AnyType newplda_count_topic_prefunc::run(AnyType & args)
+AnyType lda_count_topic_prefunc::run(AnyType & args)
 {
     MutableArrayHandle<int32_t> state1 = args[0].getAs<MutableArrayHandle<int32_t> >();
     ArrayHandle<int32_t> state2 = args[1].getAs<ArrayHandle<int32_t> >();
@@ -397,7 +397,7 @@ AnyType newplda_count_topic_prefunc::run(AnyType & args)
     return state1;
 }
 
-AnyType newplda_transpose::run(AnyType & args)
+AnyType lda_transpose::run(AnyType & args)
 {
     ArrayHandle<int32_t> matrix = args[0].getAs<ArrayHandle<int32_t> >();
     if(matrix.dims() != 2)
@@ -431,7 +431,7 @@ typedef struct __sr_ctx{
     int32_t curcall;
 } sr_ctx;
 
-void * newplda_unnest::SRF_init(AnyType &args) 
+void * lda_unnest::SRF_init(AnyType &args) 
 {
     ArrayHandle<int32_t> inarray = args[0].getAs<ArrayHandle<int32_t> >();
     if(inarray.dims() != 2)
@@ -446,7 +446,7 @@ void * newplda_unnest::SRF_init(AnyType &args)
     return ctx;
 }
 
-AnyType newplda_unnest::SRF_next(void *user_fctx, bool *is_last_call)
+AnyType lda_unnest::SRF_next(void *user_fctx, bool *is_last_call)
 {
     sr_ctx * ctx = (sr_ctx *) user_fctx;
     if (ctx->maxcall == 0) {
