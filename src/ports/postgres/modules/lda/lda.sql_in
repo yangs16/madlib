@@ -84,9 +84,9 @@ where \c wordid refers the word ID (the index of a word in the vocabulary) and
 @usage
 - The training (i.e. topic inference) can be done with the following function:
     <pre>
-        SELECT \ref lda_train('<em>data_table</em>', '<em>voc_size</em>',
-        '<em>topic_num</em>', '<em>iter_num</em>', <em>alpha</em>,
-        <em>beta</em>, <em>model_table</em>, <em>output_data_table</em>);
+        SELECT \ref lda_train(<em>'data_table'</em>, <em>'model_table'</em>,
+        <em>'output_data_table'</em>, <em>voc_size</em>, <em>topic_num</em>,
+        <em>iter_num</em>, <em>alpha</em>, <em>beta</em>)
     </pre>
     
     This function stores the resulting model in <tt><em>model_table</em></tt>.
@@ -96,8 +96,7 @@ where \c wordid refers the word ID (the index of a word in the vocabulary) and
         <em>topic_num</em> INTEGER,
         <em>alpha</em> FLOAT,
         <em>beta</em> FLOAT,
-        <em>word_topic</em> INTEGER[],
-        <em>corpus_topic</em> INTEGER[])
+        <em>model</em> INTEGER[])
     </pre>
 
     This function also stores the topic counts and the topic assignments in
@@ -109,14 +108,14 @@ where \c wordid refers the word ID (the index of a word in the vocabulary) and
         <em>words</em> INTEGER,
         <em>counts</em> INTEGER,
         <em>topic_count</em> INTEGER[],
-        <em>topic_assignment/em> INTEGER[])
+        <em>topic_assignment</em> INTEGER[])
     </pre>
 
 - The prediction (i.e. labelling of test documents using a learned LDA model)
   can be done with the following function: 
     <pre>
-        SELECT \ref lda_predict('<em>data_table</em>',
-        '<em>model_table</em>', '<em>output_table</em>');
+        SELECT \ref lda_predict(<em>'data_table'</em>, <em>'model_table'</em>,
+        <em>'output_table'</em>);
     </pre>
     
     This function stores the prediction results in
@@ -129,7 +128,7 @@ where \c wordid refers the word ID (the index of a word in the vocabulary) and
         <em>words</em> INTEGER,
         <em>counts</em> INTEGER,
         <em>topic_count</em> INTEGER[],
-        <em>topic_assignment</em> INTEGER[],
+        <em>topic_assignment</em> INTEGER[])
     </pre>
 
 @implementation
@@ -142,7 +141,7 @@ converted to the following format for efficiency:
         <em>docid</em> INTEGER,
         <em>wordcount</em> INTEGER,
         <em>words</em> INTEGER[],
-        <em>counts</em> INTEGER[]
+        <em>counts</em> INTEGER[])
     </pre>
 where \c docid is the document ID, \c wordcount is the count of words in the
 document, \c words is the list of unique words in the document, and \c counts
@@ -208,8 +207,8 @@ We now give a usage example.
 appropriate parameters. Here is an example.
 
 \code
-    SELECT MADLib.lda_train('my_training', 20, 5, 10, 5, 0.01,
-    'my_model', 'my_outdata');
+    SELECT MADLib.lda_train('my_training',  'my_model', 'my_outdata', 20, 5,
+    10, 5, 0.01);
 \endcode
 
     After a successful run of the lda_train() function, two tables will be
@@ -285,11 +284,15 @@ can use the following commands:
 
 [1] D.M. Blei, A.Y. Ng, M.I. Jordan, <em>Latent Dirichlet Allocation</em>,
     Journal of Machine Learning Research, vol. 3, pp. 993-1022, 2003.
+
 [2] T. Griffiths and M. Steyvers, <em>Finding scientific topics</em>, PNAS,
     vol. 101, pp. 5228-5235, 2004.
+
 [3] Y. Wang, H. Bai, M. Stanton, W-Y. Chen, and E.Y. Chang, <em>lda: Parallel
     Dirichlet Allocation for Large-scale Applications</em>, AAIM, 2009.
+
 [4] http://en.wikipedia.org/wiki/Latent_Dirichlet_allocation
+
 [5] J. Chang, Collapsed Gibbs sampling methods for topic models, R manual,
     2010.
 
