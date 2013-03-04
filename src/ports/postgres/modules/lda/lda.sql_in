@@ -34,17 +34,17 @@ distribution of words for each topic.
 The following generative process then defines a distribution over a corpus of
 documents. 
 
-First, sample for each topic \f$ i \f$, a per-topic word
+- Sample for each topic \f$ i \f$, a per-topic word
 distribution \f$ \phi_i \f$ from the Dirichlet(\f$\beta\f$) prior. 
 
-Second, for each document:
--# Sample a document length N from a suitable distribution, say, Poisson.
--# Sample a topic mixture \f$ \theta \f$ for the document from the
+- For each document:
+    - Sample a document length N from a suitable distribution, say, Poisson.
+    - Sample a topic mixture \f$ \theta \f$ for the document from the
 Dirichlet(\f$\alpha\f$) distribution.  
--# For each of the N words:
-   -# Sample a topic \f$ z_n \f$ from the multinomial topic distribution \f$
+    - For each of the N words:
+        - Sample a topic \f$ z_n \f$ from the multinomial topic distribution \f$
    \theta \f$.  
-   -# Sample a word \f$ w_n \f$ from the multinomial word distribution \f$
+        - Sample a word \f$ w_n \f$ from the multinomial word distribution \f$
    \phi_{z_n} \f$ associated with topic \f$ z_n \f$.
 
 In practice, only the words in each document are observable. The topic mixture
@@ -96,7 +96,7 @@ where \c wordid refers the word ID (the index of a word in the vocabulary) and
         <em>topic_num</em> INTEGER,
         <em>alpha</em> FLOAT,
         <em>beta</em> FLOAT,
-        <em>model</em> INTEGER[])
+        <em>model</em> INTEGER[][])
     </pre>
 
     This function also stores the topic counts and the topic assignments in
@@ -152,8 +152,8 @@ convertion can be done with the help of aggregation functions very easily.
 
 We now give a usage example.
 
--# As a first step, we need to prepare a dataset and vocabulary in the appropriate structure.
-\code
+- As a first step, we need to prepare a dataset and vocabulary in the appropriate structure.
+    \code
     CREATE TABLE my_vocab(wordid INT4, word TEXT)
     m4_ifdef(`__GREENPLUM__',`DISTRIBUTED BY (wordid)');
     
@@ -201,36 +201,35 @@ We now give a usage example.
     5, 1),(2, 6, 1),(2, 12, 1),(2, 14, 1),(2, 18, 1), (3, 2, 2),(3, 6, 2),(3, 7,
     1),(3, 9, 1),(3, 11, 2),(3, 14, 1),(3, 15, 1), (4, 1, 1),(4, 2, 2),(4, 3,
     1),(4, 5, 2),(4, 6, 1),(4, 11, 1),(4, 18, 2);
-\endcode
+    \endcode
 
--# To perform training, we call the lda_train() function with the
+- To perform training, we call the lda_train() function with the
 appropriate parameters. Here is an example.
-
-\code
+    \code
     SELECT MADLib.lda_train('my_training',  'my_model', 'my_outdata', 20, 5,
     10, 5, 0.01);
-\endcode
+    \endcode
 
     After a successful run of the lda_train() function, two tables will be
     generated, one for storing the learned models, and another for storing the
     output data table.
-   
+
     To get the detailed information about the learned model, we can run the
     following commands:
 
-    -# The topic description by top-k words
+    - The topic description by top-k words
     \code
         SELECT * FROM MADLib.lda_get_topic_desc('my_model', 'my_vocab',
         'my_topic_desc', 15);
     \endcode
 
-    -# The per-topic word counts
+    - The per-topic word counts
     \code
         SELECT MADLib.lda_get_topic_word_count('my_model',
         'my_topic_word_count');
     \endcode
 
-    -# The per-word topic counts
+    - The per-word topic counts
     \code
         SELECT MADLib.lda_get_word_topic_count('my_model',
         'my_word_topic_count');
@@ -239,25 +238,22 @@ appropriate parameters. Here is an example.
     To get the topic counts and the topic assignments for each doucment, we
     can run the following commands:
 
-    -# The per-document topic counts:
+    - The per-document topic counts:
     \code
         SELECT docid, topic_count FROM my_outdata;
     \endcode
 
-    -# The per-document topic assignments:
+    - The per-document topic assignments:
     \code
         SELECT docid, words, counts, topic_assignment FROM my_outdata;
     \endcode
-
     By scanning \c words, \c counts, and \c topic_assignment together, we can
     get the topic assignment for each word in a document.
 
--# To use a learned LDA model for prediction (i.e. to label new documents), we
-can use the following commands: 
-
-\code
+- To use a learned LDA model for prediction (i.e. to label new documents), we can use the following commands: 
+    \code
     SELECT MADLib.lda_predict('my_testing', 'my_model', 'my_pred');
-\endcode
+    \endcode
 
     After a successful run of the lda_predict() function, the prediction
     results will be generated and stored in <em>my_pred</em>. This table has
@@ -267,16 +263,15 @@ can use the following commands:
     To get te the topic counts and the topic assignments for each doucment, we
     can run the following commands:
 
-    -# The per-document topic counts:
+    - The per-document topic counts:
     \code
         SELECT docid, topic_count FROM my_pred;
     \endcode
 
-    -# The per-document topic assignments:
+    - The per-document topic assignments:
     \code
         SELECT docid, words, counts, topic_assignment FROM my_pred;
     \endcode
-
     By scanning \c words, \c counts, and \c topic_assignment together, we can
     get the topic assignment for each word in a document.
          
