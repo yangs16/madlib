@@ -642,6 +642,34 @@ def get_word_topic_count(madlib_schema, model_table, output_table):
         FROM %s
         """ % (output_table, madlib_schema, model_table))
 
+
+def get_perplexity(madlib_schema, output_data_table, model_table):
+    __assert(
+        model_table != '' and
+        output_data_table != '',
+        'invalid argument: at least one of the table names is not specified')
+
+    __check_model_table(model_table) 
+
+    # TODO: add output table checking function
+
+    rv = plpy.execute("""
+        SELECT exp(-part_perp/total_word) perp
+        FROM
+        (
+            SELECT %s.__lda_perplexity_agg(
+                words, counts, topic_count, model, 
+                alpha, beta, voc_size, topic_num) part_perp
+            FROM
+                %s, %s
+        ) t1,
+        (
+            SELECT sum(wordcount) total_word FROM %s
+        ) t2
+        """ % (madlib_schema, output_data_table, model_table, output_data_table))
+    return rv[0]['perp']
+
+
 """
 @brief Normalize the vector using L1 norm with smoothing
 @param vector   The vector to be normalized

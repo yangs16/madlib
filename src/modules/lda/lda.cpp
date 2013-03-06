@@ -468,6 +468,49 @@ AnyType lda_unnest::SRF_next(void *user_fctx, bool *is_last_call)
 
     return outarray;
 }
+
+AnyType lda_perplexity_sfunc::run(AnyType & args){
+    double perp = args[0].getAs<double>();
+    ArrayHandle<int32_t> words = args[1].getAs<ArrayHandle<int32_t> >();
+    ArrayHandle<int32_t> counts = args[2].getAs<ArrayHandle<int32_t> >();
+    MutableArrayHandle<int32_t> doc_topic = args[3].getAs<MutableArrayHandle<int32_t> >();
+    MutableArrayHandle<int32_t> model = args[4].getAs<MutableArrayHandle<int32_t> >();
+    double alpha = args[5].getAs<double>();
+    double beta = args[6].getAs<double>();
+    int32_t voc_size = args[7].getAs<int32_t>();
+    int32_t topic_num = args[8].getAs<int32_t>();
+
+    int32_t n_d = 0;
+    for(size_t i = 0; i < words.size(); i++){
+        n_d += counts[i];
+    }
+    
+    for(size_t i = 0; i < words.size(); i++){
+        int32_t w = words[i];
+        int32_t n_dw = counts[i];
+
+        double sum_p = 0.0;
+        for(int32_t z = 0; z < topic_num; z++){
+                int32_t n_dz = doc_topic[z];
+                int32_t n_wz = model[w * topic_num + z];
+                int32_t n_z = model[voc_size * topic_num + z];
+                sum_p += (n_wz + beta) * (n_dz + alpha)
+                            / (n_z + voc_size * beta); 
+        }
+        sum_p /= (n_d + topic_num * alpha);
+
+        perp += n_dw * log(sum_p);
+    }
+    
+    return perp;
+}
+
+AnyType lda_perplexity_prefunc::run(AnyType & args){
+    double perp1 = args[0].getAs<double>();
+    double perp2 = args[1].getAs<double>();
+    return perp1 + perp2;
+} 
+
 }
 }
 }
