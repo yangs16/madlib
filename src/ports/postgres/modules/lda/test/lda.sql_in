@@ -76,6 +76,16 @@ SELECT MADLib.lda_predict(
     'lda_model', 
     'lda_pred');
 
+SELECT MADLib.lda_predict(
+    'lda_testing', 
+    'lda_model', 
+    'lda_pred',
+    5);
+
+SELECT MADLib.lda_get_perplexity(
+    'lda_model',
+    'lda_pred');
+
 SELECT MADLib.lda_get_topic_desc(
     'lda_model', 
     'lda_vocab', 

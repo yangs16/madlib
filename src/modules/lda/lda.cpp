@@ -397,6 +397,11 @@ AnyType lda_count_topic_prefunc::run(AnyType & args)
     return state1;
 }
 
+/**
+ * @brief This function transposes a matrix represented by a 2-D array
+ * @param args[0]   The input matrix
+ * return           The transposed matrix
+ **/
 AnyType lda_transpose::run(AnyType & args)
 {
     ArrayHandle<int32_t> matrix = args[0].getAs<ArrayHandle<int32_t> >();
@@ -424,6 +429,9 @@ AnyType lda_transpose::run(AnyType & args)
     return transposed;
 }
 
+/**
+ * @brief This structure defines the states used by the following SRF.
+ **/
 typedef struct __sr_ctx{
     const int32_t * inarray;
     int32_t maxcall;
@@ -431,6 +439,10 @@ typedef struct __sr_ctx{
     int32_t curcall;
 } sr_ctx;
 
+/**
+ * @brief The function is used for the initlization of the SRF. The SRF unnests
+ * a 2-D array into a set of 1-D arrays.
+ **/
 void * lda_unnest::SRF_init(AnyType &args) 
 {
     ArrayHandle<int32_t> inarray = args[0].getAs<ArrayHandle<int32_t> >();
@@ -446,6 +458,9 @@ void * lda_unnest::SRF_init(AnyType &args)
     return ctx;
 }
 
+/**
+ * @brief The function is used to return the next row by the SRF..
+ **/
 AnyType lda_unnest::SRF_next(void *user_fctx, bool *is_last_call)
 {
     sr_ctx * ctx = (sr_ctx *) user_fctx;
@@ -469,16 +484,66 @@ AnyType lda_unnest::SRF_next(void *user_fctx, bool *is_last_call)
     return outarray;
 }
 
+/**
+ * @brief This function is the sfunc of an aggregator computing the
+ * perplexity.  
+ * @param args[0]   The current perplexity
+ * @param args[1]   The unique words in the documents
+ * @param args[2]   The counts of each unique words
+ * @param args[3]   The topic counts in the document
+ * @param args[4]   The model (word topic counts and corpus topic
+ *                  counts)
+ * @param args[5]   The Dirichlet parameter for per-document topic
+ *                  multinomial, i.e. alpha
+ * @param args[6]   The Dirichlet parameter for per-topic word
+ *                  multinomial, i.e. beta
+ * @param args[7]   The size of vocabulary
+ * @param args[8]   The number of topics
+ * @return          The updated perplexity
+ **/
 AnyType lda_perplexity_sfunc::run(AnyType & args){
     double perp = args[0].getAs<double>();
     ArrayHandle<int32_t> words = args[1].getAs<ArrayHandle<int32_t> >();
     ArrayHandle<int32_t> counts = args[2].getAs<ArrayHandle<int32_t> >();
-    MutableArrayHandle<int32_t> doc_topic = args[3].getAs<MutableArrayHandle<int32_t> >();
+    MutableArrayHandle<int32_t> topic_counts = args[3].getAs<MutableArrayHandle<int32_t> >();
     MutableArrayHandle<int32_t> model = args[4].getAs<MutableArrayHandle<int32_t> >();
     double alpha = args[5].getAs<double>();
     double beta = args[6].getAs<double>();
     int32_t voc_size = args[7].getAs<int32_t>();
     int32_t topic_num = args[8].getAs<int32_t>();
+
+    if(alpha <= 0)
+        throw std::invalid_argument("invalid argument - alpha");
+    if(beta <= 0)
+        throw std::invalid_argument("invalid argument - beta");
+    if(voc_size <= 0)
+        throw std::invalid_argument(
+            "invalid argument - voc_size");
+    if(topic_num <= 0)
+        throw std::invalid_argument(
+            "invalid argument - topic_num");
+
+    if(words.size() != counts.size())
+        throw std::invalid_argument(
+            "dimensions mismatch: words.size() != counts.size()");
+    if(__min(words) < 0 || __max(words) >= voc_size)
+        throw std::invalid_argument(
+            "invalid values in words");
+    if(__min(counts) <= 0)
+        throw std::invalid_argument(
+            "invalid values in counts");
+
+    if(topic_counts.size() != (size_t)(topic_num))
+        throw std::invalid_argument(
+            "invalid dimension - topic_counts.size() != topic_num");
+    if(__min(topic_counts, 0, topic_num) < 0)
+        throw std::invalid_argument("invalid values in topic_counts");
+
+    if(model.size() != (size_t)((voc_size + 1) * topic_num))
+        throw std::invalid_argument(
+            "invalid dimension - model.size() != (voc_size + 1) * topic_num");
+    if(__min(model) < 0)
+        throw std::invalid_argument("invalid topic counts in model");
 
     int32_t n_d = 0;
     for(size_t i = 0; i < words.size(); i++){
@@ -491,7 +556,7 @@ AnyType lda_perplexity_sfunc::run(AnyType & args){
 
         double sum_p = 0.0;
         for(int32_t z = 0; z < topic_num; z++){
-                int32_t n_dz = doc_topic[z];
+                int32_t n_dz = topic_counts[z];
                 int32_t n_wz = model[w * topic_num + z];
                 int32_t n_z = model[voc_size * topic_num + z];
                 sum_p += (n_wz + beta) * (n_dz + alpha)
@@ -505,6 +570,13 @@ AnyType lda_perplexity_sfunc::run(AnyType & args){
     return perp;
 }
 
+/**
+ * @brief This function is the prefunc of an aggregator computing the
+ * perplexity.  
+ * @param args[0]   The local perplexity
+ * @param args[1]   The local perplexity
+ * @return          The accumulated perplexity
+ **/
 AnyType lda_perplexity_prefunc::run(AnyType & args){
     double perp1 = args[0].getAs<double>();
     double perp2 = args[1].getAs<double>();
