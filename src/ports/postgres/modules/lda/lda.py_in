@@ -93,7 +93,7 @@ class LDATrainer:
 
     def init_random(self):
         stime = time.time()
-        plpy.log('initializing topics randomly..')
+        plpy.log('initializing topics randomly ...')
 
         plpy.execute('TRUNCATE TABLE %s' % (self.work_table_0));
         plpy.execute("""
@@ -113,7 +113,7 @@ class LDATrainer:
 
     def gen_model(self):
         stime = time.time()
-        plpy.log('\t\tgenerating models..')
+        plpy.log('\t\tgenerating models ...')
 
         work_table_final = self.work_table_1
         if self.iter_num % 2 == 0:
@@ -140,7 +140,7 @@ class LDATrainer:
 
     def gen_output_data_table(self):
         stime = time.time()
-        plpy.log('\t\tgenerating output data table..')
+        plpy.log('\t\tgenerating output data table ...')
 
         work_table_final = self.work_table_1
         if self.iter_num % 2 == 0:
@@ -171,8 +171,8 @@ class LDATrainer:
         if it % 2 == 0 :
             work_table_out = self.work_table_0
 
-        plpy.log('iteration [%d]...' % (it))
-        plpy.log('\t\tjoining & sampling ..')
+        plpy.log('iteration [%d] ...' % (it))
+        plpy.log('\t\tjoining & sampling ...')
         plpy.execute('TRUNCATE TABLE %s' % (work_table_out))
         plpy.execute("""
             INSERT INTO %s
@@ -220,7 +220,7 @@ class LDATrainer:
 
     def run(self):
         stime = time.time()
-        plpy.log('start training process..')
+        plpy.log('start training process ...')
 
         self.init_random()
         for it in range(1, self.iter_num + 1):
@@ -303,7 +303,7 @@ class LDAPredictor:
 
     def init_random(self):
         stime = time.time()
-        plpy.log('initializing topics randomly..')
+        plpy.log('initializing topics randomly ...')
 
         plpy.execute('TRUNCATE TABLE %s' % (self.work_table_0));
         plpy.execute("""
@@ -335,7 +335,7 @@ class LDAPredictor:
 
     def infer(self):  
         stime = time.time()
-        plpy.log('infering..')
+        plpy.log('infering ...')
 
         plpy.execute("""
             INSERT INTO %s
@@ -373,7 +373,7 @@ class LDAPredictor:
 
     def run(self):
         stime = time.time()
-        plpy.log('start prediction process..')
+        plpy.log('start prediction process ...')
 
         self.init_random()
         self.infer()
