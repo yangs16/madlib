@@ -903,7 +903,7 @@ def __warn(condition, msg):
 """
 def __check_data_table(data_table):
     plpy.log('checking the data table ... ')
-    assert(data_table.strip(), 'no data table is specified')
+    assert(data_table.strip() != '', 'no data table is specified')
     try:
         rv = plpy.execute("""
             SELECT count(*) cnt FROM pg_attribute 
